@@ -1,0 +1,156 @@
+# Chat UX flow (no native Catalog)
+
+- [Goals]
+  - Showcase 13 products cleanly.
+  - Support color/variant selection and a lightweight cart.
+  - Avoid spam; minimize message count.
+  - Keep Firestore as source of truth.
+
+- [Principles]
+  - One outbound message per user action when possible.
+  - Prefer interactive messages (List/Buttons) over multiple media.
+  - Paginate products: 3–4 per page (configurable; default 3 to reduce scroll).
+  - In detail view (B2B): send 1 composite/hero image + caption; offer "More images" to fetch remaining in batches.
+  - Use concise captions with price and key highlights.
+  - Respect 24h session. Use approved templates for business-initiated.
+
+- [Entry points]
+  - Template: welcome_browse (approved) to invite browsing.
+  - Session: when user says "hi", show Main menu.
+
+- [Language selection]
+  - On first contact, prompt for language (List): English, Kannada, Hindi, Cancel.
+  - Persist selection to `customers.language` and `sessions.language`.
+  - Cancel path: reply (in the selected/default language):
+    - EN: "Please restart your shopping by sending 'shop'"
+    - KN/HI equivalents as localized strings.
+  - After language is set, proceed to B2B gate.
+
+- [Main menu]
+  - List message options:
+    - Browse all products
+    - Filter by category
+    - Filter by color
+    - View cart
+
+- [Browse flow | pagination]
+  - Show 3–4 products per page via a List (use 4 if you prefer denser pages):
+    - title: "Products (Page X/Y)"
+    - rows: [{ id: sku, title, description: "₹price — short" }]
+  - Buttons footer: Prev, Next, Back
+  - Selecting a product → Product Detail
+
+- [Filter flows]
+  - Category filter via List (≤10 items)
+  - Color filter via List (popular first)
+  - Type filter via List: Indian, Imported (maps to product.tag/type)
+  - After selection, go to paginated browse with applied filter
+
+- [Product Detail]
+  - Send 1 composite/hero image (shows all colors if available) + caption:
+    - Title | ₹Price
+    - 1–2 key features
+    - Note: "Images include all colorways. More images available."
+  - Buttons:
+    - More images
+    - Add to cart
+    - Back to list
+
+// Color/variant selection removed for B2B: we show all images instead of selecting colors.
+
+- [More images (on demand)]
+  - Send remaining images in controlled batches (2–3 per request; default 2 to avoid spam)
+  - Include "More" until exhausted; then show Back
+
+- [Cart flow]
+  - Add to cart → Firestore: { wa_id, sku, color, qty:1 }
+  - After add, Buttons:
+    - Increase qty
+    - Checkout
+    - Continue browsing
+    - View cart
+  - View cart → text summary (show first 1–3 items) + Buttons:
+    - Checkout
+    - Clear cart
+    - Back
+  - Checkout → payment link or chat checkout.
+    - If chat checkout, collect:
+      - Full name
+      - Address (single or multi-line)
+      - PIN/Phone (if required for delivery)
+    - Show confirmation summary and ask to Confirm/Cancel.
+    - On Confirm: create order, send Thank You message.
+      - EN: "Thank you! Your order is confirmed."
+      - Localize per selected language.
+
+- [Session & templates]
+  - Business-initiated: approved templates (welcome_browse, payment_link, order_update)
+  - Session: free-form within 24h after user reply
+
+- [State machine]
+  - sessions: { wa_id, state, filters, page, selected_product, images_page }
+  - States:
+    - LANGUAGE
+    - B2B_GATE
+    - MENU
+    - BROWSE(page, filters)
+    - DETAIL(product_id)
+    - DETAIL_IMAGES(product_id, images_page)
+    - CART
+    - CHECKOUT
+  - Transitions driven by list/button payloads
+
+- [Firestore schema]
+  - products: { sku, title, price, images: [urls...], hero_image_index: 0, type, category, short_desc }
+  - customers: { wa_id, name?, preferences }
+  - sessions: { language, gate:is_b2b?, images_page, ...as above }
+  - carts: { wa_id, items: [{ sku, color, qty }] }
+  - messages_log: { id, wa_id, type, payload, ts, delivery_status }
+  - templates: { name, locale, variables }
+
+- [Message payload patterns]
+  - Main menu (List):
+    - title: "What would you like to do?"
+    - sections: [Browse all products, Filter by category, Filter by color, View cart]
+  - Language (List): English, Kannada, Hindi, Cancel
+  - B2B Gate (Buttons): "Are you a B2B buyer?" → Yes / No / Cancel
+  - Products page (List):
+    - title: "Products (Page X/Y)"
+    - rows: 3 items with {id:title:description}
+    - buttons: Prev, Next, Back
+  - Product detail (Hero image + caption) then Buttons [More images | Add to cart | Back]
+  - Cart summary (Text) then Buttons
+
+- [Rate limiting]
+  - One message per action; if image + buttons needed, send back-to-back only in detail step
+  - On "More images", send max 2–3 images per request (configurable; default 2)
+  - Throttle unsolicited sends; template only when compliant
+
+- [Error handling]
+  - Invalid/expired selection → "Option expired. Returning to list." and reopen previous list
+  - Media fail → send caption + link instead
+  - Cancel at Language/B2B gate → localized restart instruction as above
+
+- [KPIs]
+  - Conversion funnel drop-offs
+  - Messages per conversion (lower is better)
+  - Image failure rate
+
+- [Testing]
+  - Pagination edges (first/last)
+  - Filters + pagination
+  - Variant without images
+  - Image pagination overflow
+  - Cart add/increase/clear
+  - Session expiry and template fallback
+
+- [Templates to set up]
+  - welcome_browse (utility/marketing per policy)
+  - payment_link (transactional)
+  - order_update (transactional)
+  - back_in_stock (optional)
+
+- [Rollout]
+  - Start with 6 products, iterate on CTR and message count
+  - Cache product lists for fast responses
+  - Monitor rate limits and template rejections

@@ -70,6 +70,8 @@ function verifySignature(req) {
 
 // --- Health ---
 app.get('/healthz', (req, res) => res.status(200).send('ok'));
+app.get('/health', (req, res) => res.status(200).send('ok'));
+app.get('/', (req, res) => res.status(200).send('ok'));
 
 // --- WhatsApp webhook verification ---
 app.get('/webhook/whatsapp', (req, res) => {
@@ -162,6 +164,10 @@ async function handleMessage(waUserId, text, rawMsg) {
   }
 
   if (sess.state === 'browse') {
+    // Allow re-showing catalog on demand
+    if (lower === 'catalog' || lower === 'browse' || lower.includes('wholesale')) {
+      return showCatalog(to);
+    }
     if (lower.startsWith('add ')) {
       // format: add SKU QTY
       const parts = lower.split(/\s+/);

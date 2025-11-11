@@ -14,3 +14,5 @@ logs/
 
 # Build outputs
 .DS_Store
+
+Dockerfile
