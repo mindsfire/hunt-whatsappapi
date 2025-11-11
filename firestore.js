@@ -55,3 +55,29 @@ export async function createOrderDoc(order) {
   const ref = col('orders').doc(order.id);
   await ref.set(order);
 }
+
+// --- WhatsApp media cache ---
+// key: hash or path string (we will use the full GCS path as key)
+export async function getMediaCache(key) {
+  const doc = await col('whatsapp_media_cache').doc(encodeKey(key)).get();
+  return doc.exists ? doc.data() : null;
+}
+export async function setMediaCache(key, data) {
+  await col('whatsapp_media_cache').doc(encodeKey(key)).set({ ...data, updated_at: new Date().toISOString() }, { merge: true });
+}
+function encodeKey(key) {
+  // Firestore doc IDs cannot contain forward slashes, replace with a safe token
+  return String(key).replaceAll('/', '__');
+}
+
+// --- Optional: products (for future GCS indexer) ---
+export async function upsertProduct(prod) {
+  const ref = col('products').doc(prod.sku);
+  await ref.set({ ...prod, updated_at: new Date().toISOString() }, { merge: true });
+}
+export async function listProductsByType(type, limit = 10, startAfterTitle = null) {
+  let q = col('products').where('type', '==', type).orderBy('title');
+  if (startAfterTitle) q = q.startAfter(startAfterTitle);
+  const snap = await q.limit(limit).get();
+  return snap.docs.map(d => d.data());
+}
