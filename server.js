@@ -44,6 +44,117 @@ const adminDb = new Firestore({ projectId: process.env.GOOGLE_CLOUD_PROJECT || p
 
 function nowIso() { return new Date().toISOString(); }
 
+// --- Firestore-backed browse/detail (GCS indexed) ---
+async function getTypes() {
+  const doc = await adminDb.collection('config').doc('types').get();
+  const data = doc.exists ? doc.data() : { types: ['indian','imported'] };
+  return Array.isArray(data.types) && data.types.length ? data.types : ['indian','imported'];
+}
+
+async function showTypes(to) {
+  const types = await getTypes();
+  // If only two, send buttons; else send text list
+  if (types.length <= 3) {
+    const buttons = types.map(t => ({ type: 'reply', reply: { id: `type_${t}`, title: t.charAt(0).toUpperCase() + t.slice(1) } }));
+    buttons.push({ type: 'reply', reply: { id: 'type_help', title: 'Help' } });
+    return sendButtons(to, 'Choose a type to browse', buttons);
+  }
+  return sendText(to, `Available types:\n- ${types.join('\n- ')}\nReply with a type name (e.g., Indian).`);
+}
+
+async function getProductsByType(type) {
+  const doc = await adminDb.collection('products_by_type').doc(type).get();
+  return doc.exists ? (doc.data().items || []) : [];
+}
+
+async function showProductsPage(to, type, page = 0, pageSize = 3) {
+  const items = await getProductsByType(type);
+  if (!items.length) return sendText(to, `No products for type '${type}'. Reply 'types' to choose again.`);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const p = Math.min(Math.max(0, page), totalPages - 1);
+  const slice = items.slice(p * pageSize, p * pageSize + pageSize);
+  const header = `Products (${type}) page ${p + 1}/${totalPages}:`;
+  for (const it of slice) {
+    try {
+      const sku = (it.sku || '').toLowerCase();
+      const pd = await getProductDoc(sku);
+      const imgs = Array.isArray(pd?.images) ? pd.images : [];
+      const heroIdx = Number.isInteger(pd?.hero_image_index) ? pd.hero_image_index : 0;
+      const heroPath = imgs[heroIdx];
+      if (heroPath) {
+        const mediaId = await getOrCreateMediaIdForGcsPath(heroPath);
+        const cap = `${(it.sku || '').toUpperCase()}${it.title ? ' — ' + it.title : ''}`;
+        await sendImageByMediaId(to, mediaId, cap);
+      }
+    } catch (_) {}
+  }
+  // Build interactive list rows to make selection easier
+  const rows = slice.map(it => ({
+    id: `view_${(it.sku || '').toLowerCase()}`,
+    title: (it.sku || '').toUpperCase(),
+    description: `${it.title || ''}`.trim() || `${it.image_count || 0} images`
+  }));
+  // WhatsApp list supports up to 10 rows. Our page size is <= 4, safe.
+  await sendList(to, header, 'Choose SKU', `Page ${p + 1}`, rows);
+  // Follow-up instructions for paging
+  return sendText(to, "Reply 'next'/'prev' to page, or type 'view <SKU>' if needed. Type 'types' to change type.");
+}
+
+async function getProductDoc(sku) {
+  const doc = await adminDb.collection('products').doc((sku || '').toLowerCase()).get();
+  return doc.exists ? doc.data() : null;
+}
+
+async function showProductDetail(to, sku, sess) {
+  const p = await getProductDoc(sku);
+  if (!p) return sendText(to, `Unknown SKU ${sku}. Reply 'browse' to list again.`);
+  const images = Array.isArray(p.images) ? p.images : [];
+  if (!images.length) return sendText(to, `${sku}: No images.`);
+  const heroIdx = Number.isInteger(p.hero_image_index) ? p.hero_image_index : 0;
+  const heroPath = images[heroIdx];
+  const caption = `${sku}${p.title ? ' | ' + p.title : ''}\nImages: ${images.length}\nReply 'more images' to see more, or 'add ${sku} <QTY>' to add to cart.`;
+  try {
+    const mediaId = await getOrCreateMediaIdForGcsPath(heroPath);
+    await sendImageByMediaId(to, mediaId, caption);
+  } catch (e) {
+    console.error('detail send hero error', e);
+    await sendText(to, `${caption}\n(Preview unavailable)`);
+  }
+  // prepare for more images
+  sess.selected_product = sku;
+  sess.images_offset = 0; // next batch starts from first non-hero index
+  await dbSaveSession(to, sess);
+}
+
+async function sendMoreImages(to, sess) {
+  const sku = sess.selected_product;
+  if (!sku) return sendText(to, 'No product selected. Use view <SKU>.');
+  const p = await getProductDoc(sku);
+  if (!p || !Array.isArray(p.images) || !p.images.length) return sendText(to, 'No more images.');
+  const heroIdx = Number.isInteger(p.hero_image_index) ? p.hero_image_index : 0;
+  // Build list excluding hero
+  const rest = p.images.filter((_, idx) => idx !== heroIdx);
+  const start = sess.images_offset || 0;
+  const end = Math.min(rest.length, start + MEDIA_BATCH_SIZE);
+  if (start >= rest.length) return sendText(to, 'No more images.');
+  const batch = rest.slice(start, end);
+  for (const gcsPath of batch) {
+    try {
+      const mediaId = await getOrCreateMediaIdForGcsPath(gcsPath);
+      await sendImageByMediaId(to, mediaId);
+    } catch (e) {
+      console.error('more images send error', e);
+    }
+  }
+  sess.images_offset = end;
+  await dbSaveSession(to, sess);
+  if (end < rest.length) {
+    return sendText(to, `Sent ${batch.length}. Reply 'more images' for more.`);
+  } else {
+    return sendText(to, 'All images sent.');
+  }
+}
+
 // --- WhatsApp helpers ---
 function waApiUrl() { return `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`; }
 async function waSend(payload) {
@@ -64,6 +175,26 @@ async function sendText(to, body) {
 }
 async function sendButtons(to, text, buttons) {
   return waSend({ messaging_product: 'whatsapp', to, type: 'interactive', interactive: { type: 'button', body: { text }, action: { buttons } } });
+}
+async function sendList(to, bodyText, buttonText, sectionTitle, rows) {
+  return waSend({
+    messaging_product: 'whatsapp',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: bodyText },
+      action: {
+        button: buttonText || 'Select',
+        sections: [
+          {
+            title: sectionTitle || 'Options',
+            rows
+          }
+        ]
+      }
+    }
+  });
 }
 async function sendImage(to, imageUrl, caption = '') {
   return waSend({ messaging_product: 'whatsapp', to, type: 'image', image: { link: imageUrl, caption } });
@@ -344,7 +475,43 @@ async function handleMessage(waUserId, text, rawMsg) {
   const to = waUserId;
   const sess = await dbGetSession(waUserId);
 
-  const lower = (text || '').trim().toLowerCase();
+  let lower = (text || '').trim().toLowerCase();
+  // Map interactive list/button reply IDs to commands (e.g., view_<sku>)
+  try {
+    if (rawMsg && rawMsg.type === 'interactive' && rawMsg.interactive) {
+      const it = rawMsg.interactive;
+      const id = (it.button_reply && it.button_reply.id) || (it.list_reply && it.list_reply.id) || '';
+      if (id && typeof id === 'string') {
+        const idLower = id.toLowerCase();
+        if (idLower.startsWith('view_')) {
+          const sku = idLower.slice(5);
+          lower = `view ${sku}`;
+        } else if (idLower.startsWith('type_')) {
+          // Normalize type selection
+          const t = idLower.slice(5);
+          lower = t; // 'indian' or 'imported' or 'help'
+        } else if (idLower.startsWith('mode_')) {
+          lower = idLower; // handled in ask_mode
+        }
+      }
+    }
+  } catch (_) {}
+
+  // Global escape routes to avoid getting stuck
+  if (lower === 'types' || lower === 'type') {
+    sess.state = 'types';
+    await dbSaveSession(waUserId, sess);
+    return showTypes(to);
+  }
+  if (lower === 'browse' || lower === 'catalog') {
+    // If we know the type, reopen browse
+    if (sess.type) {
+      sess.state = 'browse';
+      sess.page = sess.page || 0;
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type, sess.page);
+    }
+  }
   if (sess.state === 'start') {
     sess.state = 'ask_mode';
     await dbSaveSession(waUserId, sess);
@@ -357,23 +524,70 @@ async function handleMessage(waUserId, text, rawMsg) {
   if (sess.state === 'ask_mode') {
     if (lower.includes('wholesale') || lower.includes('mode_wholesale')) {
       sess.mode = 'wholesale';
-      sess.state = 'browse';
+      sess.state = 'types';
       await dbSaveSession(waUserId, sess);
-      return showCatalog(to);
+      return showTypes(to);
     }
     if (lower.includes('retail') || lower.includes('mode_retail')) {
       sess.mode = 'retail';
-      sess.state = 'browse';
+      sess.state = 'types';
       await dbSaveSession(waUserId, sess);
-      return sendText(to, 'Retail flow is limited. Please browse items and ask for assistance.');
+      return showTypes(to);
     }
     return sendText(to, 'Please choose Wholesale or Retail.');
   }
 
+  // Choose type (indian/imported)
+  if (sess.state === 'types') {
+    if (lower.includes('indian') || lower === 'indian') {
+      sess.type = 'indian';
+      sess.page = 0;
+      sess.state = 'browse';
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type, sess.page);
+    }
+    if (lower.includes('imported') || lower === 'imported') {
+      sess.type = 'imported';
+      sess.page = 0;
+      sess.state = 'browse';
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type, sess.page);
+    }
+    // re-show types on any other input
+    return showTypes(to);
+  }
+
   if (sess.state === 'browse') {
     // Allow re-showing catalog on demand
-    if (lower === 'catalog' || lower === 'browse' || lower.includes('wholesale')) {
-      return showCatalog(to);
+    if (lower === 'types' || lower === 'type') {
+      sess.state = 'types';
+      await dbSaveSession(waUserId, sess);
+      return showTypes(to);
+    }
+    if (lower === 'catalog' || lower === 'browse') {
+      sess.page = 0;
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type || 'indian', sess.page);
+    }
+    if (lower === 'next') {
+      sess.page = (sess.page || 0) + 1;
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type || 'indian', sess.page);
+    }
+    if (lower === 'prev' || lower === 'previous') {
+      sess.page = Math.max(0, (sess.page || 0) - 1);
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type || 'indian', sess.page);
+    }
+    if (lower.startsWith('view ')) {
+      const rawSku = (text || '').trim().slice(5).trim();
+      const sku = rawSku ? rawSku.toLowerCase() : '';
+      if (!sku) return sendText(to, "Usage: view <SKU>");
+      sess.selected_product = sku;
+      sess.images_offset = 0;
+      sess.state = 'detail';
+      await dbSaveSession(waUserId, sess);
+      return showProductDetail(to, sku, sess);
     }
     if (lower.startsWith('add ')) {
       // format: add SKU QTY
@@ -408,7 +622,42 @@ async function handleMessage(waUserId, text, rawMsg) {
       await dbSaveSession(waUserId, sess);
       return sendText(to, 'Please share your Business Name (reply: biz <name>).');
     }
-    return sendText(to, "Type 'add <SKU> <QTY>' to add items, 'cart' to view, or 'checkout' to place order.");
+    return sendText(to, "Type 'view <SKU>' to see details, 'next'/'prev' to page, 'add <SKU> <QTY>' to add items, 'cart' to view, or 'checkout' to place order.");
+  }
+
+  // Detail state: show hero already sent; support more images and navigation
+  if (sess.state === 'detail') {
+    if (lower === 'more images' || lower === 'more' || lower === 'images') {
+      return sendMoreImages(to, sess);
+    }
+    if (lower === 'browse' || lower === 'catalog') {
+      sess.state = 'browse';
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type || 'indian', sess.page || 0);
+    }
+    if (lower === 'next') {
+      sess.page = (sess.page || 0) + 1;
+      sess.state = 'browse';
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type || 'indian', sess.page || 0);
+    }
+    if (lower === 'prev' || lower === 'previous') {
+      sess.page = Math.max(0, (sess.page || 0) - 1);
+      sess.state = 'browse';
+      await dbSaveSession(waUserId, sess);
+      return showProductsPage(to, sess.type || 'indian', sess.page || 0);
+    }
+    if (lower.startsWith('view ')) {
+      const rawSku2 = (text || '').trim().slice(5).trim();
+      const sku2 = rawSku2 ? rawSku2.toLowerCase() : '';
+      if (!sku2) return sendText(to, "Usage: view <SKU>");
+      sess.selected_product = sku2;
+      sess.images_offset = 0;
+      await dbSaveSession(waUserId, sess);
+      return showProductDetail(to, sku2, sess);
+    }
+    // Default help in detail
+    return sendText(to, "Reply 'more images' for more, 'browse' to go back, or 'types' to change category.");
   }
 
   if (sess.state === 'business') {
