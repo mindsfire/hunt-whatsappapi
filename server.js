@@ -529,12 +529,35 @@ async function handleMessage(waUserId, text, rawMsg) {
       return showTypes(to);
     }
     if (lower.includes('retail') || lower.includes('mode_retail')) {
+      // B2B gate: we serve wholesale only. Confirm buyer is B2B.
       sess.mode = 'retail';
+      sess.state = 'b2b_gate';
+      await dbSaveSession(waUserId, sess);
+      return sendButtons(to, 'We currently serve Wholesale buyers. Are you buying for a business/resale?', [
+        { type: 'reply', reply: { id: 'b2b_no', title: 'No' } },
+        { type: 'reply', reply: { id: 'b2b_yes', title: 'I am Wholeseller' } }
+      ]);
+    }
+    return sendText(to, 'Please choose Wholesale or Retail.');
+  }
+
+  // B2B gate confirmation
+  if (sess.state === 'b2b_gate') {
+    if (lower.includes('b2b_yes') || lower === 'yes' || lower.includes('yes')) {
+      sess.mode = 'wholesale';
       sess.state = 'types';
       await dbSaveSession(waUserId, sess);
       return showTypes(to);
     }
-    return sendText(to, 'Please choose Wholesale or Retail.');
+    if (lower.includes('b2b_no') || lower === 'no') {
+      sess.state = 'start';
+      await dbSaveSession(waUserId, sess);
+      return sendText(to, "Thanks for your interest! We currently sell to businesses only. If you represent a business, reply 'Wholesale' to continue.");
+    }
+    return sendButtons(to, 'Are you a Wholesale (business) buyer?', [
+      { type: 'reply', reply: { id: 'b2b_no', title: 'No' } },
+      { type: 'reply', reply: { id: 'b2b_yes', title: 'I am Wholeseller' } }
+    ]);
   }
 
   // Choose type (indian/imported)
