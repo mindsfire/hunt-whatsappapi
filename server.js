@@ -74,6 +74,12 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
   const p = Math.min(Math.max(0, page), totalPages - 1);
   const slice = items.slice(p * pageSize, p * pageSize + pageSize);
   const header = `Products (${type}) page ${p + 1}/${totalPages}:`;
+  // Check if user has items in cart to show 'View cart' button
+  let hasCart = false;
+  try {
+    const cart = await dbGetCart(to);
+    hasCart = Array.isArray(cart?.items) && cart.items.length > 0;
+  } catch (_) {}
   for (const it of slice) {
     try {
       const sku = (it.sku || '').toLowerCase();
@@ -85,6 +91,21 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
         const mediaId = await getOrCreateMediaIdForGcsPath(heroPath);
         const cap = `${(it.sku || '').toUpperCase()}${it.title ? ' — ' + it.title : ''}`;
         await sendImageByMediaId(to, mediaId, cap);
+        // Remember last shown SKU to interpret plain 'View'/'Add to cart'
+        try {
+          const s2 = await dbGetSession(to);
+          s2.last_browse_sku = sku;
+          await dbSaveSession(to, s2);
+        } catch (_) {}
+        // Add per-product quick actions
+        const actions = [
+          { type: 'reply', reply: { id: `view_${sku}`, title: 'View' } },
+          { type: 'reply', reply: { id: `add_${sku}`, title: 'Add to cart' } }
+        ];
+        if (hasCart && actions.length < 3) {
+          actions.push({ type: 'reply', reply: { id: 'cart_view', title: 'View cart' } });
+        }
+        await sendButtons(to, (it.title || 'Choose action'), actions);
       }
     } catch (_) {}
   }
@@ -96,8 +117,23 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
   }));
   // WhatsApp list supports up to 10 rows. Our page size is <= 4, safe.
   await sendList(to, header, 'Choose SKU', `Page ${p + 1}`, rows);
-  // Follow-up instructions for paging
-  return sendText(to, "Reply 'next'/'prev' to page, or type 'view <SKU>' if needed. Type 'types' to change type.");
+  // Add paging buttons for easier navigation
+  {
+    const pageBtns = [
+      { type: 'reply', reply: { id: 'page_prev', title: 'Prev' } },
+      { type: 'reply', reply: { id: 'page_next', title: 'Next' } },
+      { type: 'reply', reply: { id: 'page_types', title: 'Types' } }
+    ];
+    if (hasCart && pageBtns.length < 3) {
+      // Note: buttons max 3; if we already have 3, skip adding cart here
+    } else if (hasCart) {
+      // Replace 'Types' with 'View cart' to stay within 3 buttons
+      pageBtns[2] = { type: 'reply', reply: { id: 'cart_view', title: 'View cart' } };
+    }
+    await sendButtons(to, `Page ${p + 1}/${totalPages}`, pageBtns);
+  }
+  // Follow-up instructions (text fallback)
+  return sendText(to, "Tip: Use buttons for paging. You can also type 'next'/'prev' or 'view <SKU>'.");
 }
 
 async function getProductDoc(sku) {
@@ -467,6 +503,7 @@ function extractMessageText(m) {
       }
     }
   } catch (_) {}
+
   return '';
 }
 
@@ -486,16 +523,32 @@ async function handleMessage(waUserId, text, rawMsg) {
         if (idLower.startsWith('view_')) {
           const sku = idLower.slice(5);
           lower = `view ${sku}`;
+        } else if (idLower.startsWith('add_')) {
+          const sku = idLower.slice(4);
+          lower = `add ${sku} 1`;
         } else if (idLower.startsWith('type_')) {
           // Normalize type selection
           const t = idLower.slice(5);
           lower = t; // 'indian' or 'imported' or 'help'
         } else if (idLower.startsWith('mode_')) {
           lower = idLower; // handled in ask_mode
+        } else if (idLower === 'page_prev') {
+          lower = 'prev';
+        } else if (idLower === 'page_next') {
+          lower = 'next';
+        } else if (idLower === 'page_types') {
+          lower = 'types';
+        } else if (idLower === 'cart_view') {
+          lower = 'cart';
         }
       }
     }
   } catch (_) {}
+
+  if ((lower === 'view' || lower === 'add to cart' || lower === 'add') && sess.last_browse_sku) {
+    if (lower === 'view') lower = `view ${sess.last_browse_sku}`;
+    else lower = `add ${sess.last_browse_sku} 1`;
+  }
 
   // Global escape routes to avoid getting stuck
   if (lower === 'types' || lower === 'type') {
@@ -613,25 +666,58 @@ async function handleMessage(waUserId, text, rawMsg) {
       return showProductDetail(to, sku, sess);
     }
     if (lower.startsWith('add ')) {
-      // format: add SKU QTY
+      // format: add SKU QTY (SKU may be lowercase from products collection)
       const parts = lower.split(/\s+/);
-      const sku = (parts[1] || '').toUpperCase();
+      const skuRaw = (parts[1] || '').trim();
+      const skuLower = skuRaw.toLowerCase();
+      const skuUpper = skuRaw.toUpperCase();
       const qty = parseInt(parts[2] || '0', 10);
-      const p = await getCatalogItem(sku);
-      if (!p) return sendText(to, 'Unknown SKU. Reply with SKU shown in the caption.');
       if (!Number.isInteger(qty) || qty <= 0) return sendText(to, 'Please provide a valid quantity.');
-      const moq = p.moq || 1;
+
+      // Prefer products doc (new flow), fallback to legacy catalog
+      let price = 0;
+      let currency = 'INR';
+      let moq = 1;
+      let skuForCart = skuUpper; // store uppercase for readability
+      const prod = await getProductDoc(skuLower);
+      if (prod) {
+        price = Number(prod.price || 0);
+        currency = (prod.currency || 'INR').toUpperCase();
+        moq = Number.isInteger(prod.moq) && prod.moq > 0 ? prod.moq : 1;
+      } else {
+        const legacy = await getCatalogItem(skuUpper);
+        if (legacy) {
+          price = Number(legacy.price || 0);
+          currency = (legacy.currency || 'INR').toUpperCase();
+          moq = Number.isInteger(legacy.moq) && legacy.moq > 0 ? legacy.moq : 1;
+        } else {
+          return sendText(to, 'Unknown SKU. Reply with SKU shown in the caption.');
+        }
+      }
+
       if (qty % moq !== 0) {
         const up = Math.ceil(qty / moq) * moq;
         const down = Math.floor(qty / moq) * moq;
         return sendText(to, `Quantity must be a multiple of ${moq}. Try ${down > 0 ? down : moq} or ${up}.`);
       }
+
       const cart = await dbGetCart(waUserId);
       cart.items = cart.items || [];
-      cart.items.push({ sku, qty, unit_price: p.price, currency: p.currency || 'INR' });
-      cart.currency = p.currency || cart.currency || 'INR';
+      const existing = cart.items.find(i => i.sku === skuForCart);
+      if (existing) {
+        existing.qty += qty;
+        existing.unit_price = price || existing.unit_price;
+        existing.currency = currency || existing.currency || 'INR';
+      } else {
+        cart.items.push({ sku: skuForCart, qty, unit_price: price, currency });
+      }
+      cart.currency = currency || cart.currency || 'INR';
       await dbSaveCart(waUserId, cart);
-      return sendText(to, `Added ${qty} of ${sku} to cart.`);
+      await sendText(to, `Added ${qty} of ${skuForCart} to cart.`);
+      return sendButtons(to, 'Next steps', [
+        { type: 'reply', reply: { id: 'cart_view', title: 'View cart' } },
+        { type: 'reply', reply: { id: 'checkout', title: 'Checkout' } }
+      ]);
     }
     if (lower === 'cart' || lower === 'view') {
       const cart = await dbGetCart(waUserId);
