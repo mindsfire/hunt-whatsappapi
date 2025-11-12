@@ -10,3 +10,6 @@ gcloud run deploy hunt-whatsappapi \
 gcloud alpha run services logs tail hunt-whatsappapi \
   --region asia-south1 \
   --project hunt-whatsappapi
+
+
+# future commands coming soon
