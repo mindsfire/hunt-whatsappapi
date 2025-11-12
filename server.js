@@ -590,6 +590,29 @@ function extractMessageText(m) {
   return '';
 }
 
+async function sendHelp(to, sess) {
+  const state = sess && sess.state ? sess.state : 'start';
+  if (state === 'start' || state === 'ask_mode') {
+    return sendText(to, "Choose Wholesale if you're buying for business/resale. Choose Retail only if you're a business buyer. Reply 'Wholesale' or use the buttons.");
+  }
+  if (state === 'types') {
+    return sendText(to, "Select a category like Indian or Imported. We'll show products with images. You can change later by typing 'types'.");
+  }
+  if (state === 'browse') {
+    return sendText(to, "Use Prev/Next to page. Type 'view <SKU>' for details, 'add <SKU> <QTY>' to add to cart, 'cart' to view cart, 'checkout' to place order.");
+  }
+  if (state === 'detail') {
+    return sendText(to, "Reply 'more images' to see more, 'browse' to return to list, 'add <SKU> <QTY>' to add to cart, 'types' to change category.");
+  }
+  if (state === 'business') {
+    return sendText(to, "Reply your Business Name (e.g., biz Mindsfire).");
+  }
+  if (state === 'confirm') {
+    return sendText(to, "Press Confirm to place the order or Cancel to discard.");
+  }
+  return sendText(to, "Type 'Wholesale' to start, or 'types' to browse categories. You can type 'help' anytime.");
+}
+
 // --- Simple state machine ---
 async function handleMessage(waUserId, text, rawMsg) {
   const to = waUserId;
@@ -630,6 +653,10 @@ async function handleMessage(waUserId, text, rawMsg) {
       }
     }
   } catch (_) {}
+
+  if (lower === 'help' || lower === 'type_help') {
+    return sendHelp(to, sess);
+  }
 
   if ((lower === 'view' || lower === 'add to cart' || lower === 'add') && sess.last_browse_sku) {
     if (lower === 'view') lower = `view ${sess.last_browse_sku}`;
