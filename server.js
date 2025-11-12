@@ -623,6 +623,9 @@ async function handleMessage(waUserId, text, rawMsg) {
           lower = 'types';
         } else if (idLower === 'cart_view') {
           lower = 'cart';
+        } else if (idLower.startsWith('qtyplus_')) {
+          const sku = idLower.slice(8);
+          lower = `add ${sku} 1`;
         }
       }
     }
@@ -791,11 +794,7 @@ async function handleMessage(waUserId, text, rawMsg) {
         return sendText(to, `Price not set for ${skuUpper}. Please update the catalog price and try again.`);
       }
 
-      if (qty % moq !== 0) {
-        const up = Math.ceil(qty / moq) * moq;
-        const down = Math.floor(qty / moq) * moq;
-        return sendText(to, `Quantity must be a multiple of ${moq}. Try ${down > 0 ? down : moq} or ${up}.`);
-      }
+      // No MOQ enforcement: allow any integer qty >= 1
 
       const cart = await dbGetCart(waUserId);
       cart.items = cart.items || [];
@@ -811,6 +810,7 @@ async function handleMessage(waUserId, text, rawMsg) {
       await dbSaveCart(waUserId, cart);
       await sendText(to, `Added ${qty} of ${skuForCart} to cart.`);
       return sendButtons(to, 'Next steps', [
+        { type: 'reply', reply: { id: `qtyplus_${skuLower}`, title: '+1 set' } },
         { type: 'reply', reply: { id: 'cart_view', title: 'View cart' } },
         { type: 'reply', reply: { id: 'checkout', title: 'Checkout' } }
       ]);
