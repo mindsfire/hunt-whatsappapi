@@ -42,6 +42,89 @@ const WA_WABA_ID = process.env.WA_WABA_ID || '';
 initDb();
 const adminDb = new Firestore({ projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT });
 
+// --- Admin: Sync catalog from Google Sheets ---
+// Usage: GET /admin/sync-catalog-from-sheets?sheetId=...&range=Catalog!A1:Z&mode=dry-run|commit
+app.get('/admin/sync-catalog-from-sheets', async (req, res) => {
+  try {
+    if (SYNC_SHARED_SECRET) {
+      const token = req.get('X-Shared-Secret') || '';
+      if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+    }
+    const sheetId = (req.query.sheetId || '').toString().trim();
+    const range = (req.query.range || 'Catalog!A1:Z').toString().trim();
+    const mode = (req.query.mode || 'dry-run').toString();
+    if (!sheetId) return res.status(400).json({ ok: false, error: 'sheetId required' });
+
+    const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] });
+    const sheets = google.sheets({ version: 'v4', auth });
+    const g = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
+    const values = g.data.values || [];
+    if (values.length < 2) return res.status(200).json({ ok: false, error: 'No data rows found (need header + at least one row).' });
+    const header = values[0].map(h => (h || '').toString().trim());
+
+    const rows = [];
+    for (let i = 1; i < values.length; i++) {
+      const r = values[i];
+      const obj = {};
+      for (let c = 0; c < header.length; c++) {
+        const key = header[c];
+        if (!key) continue;
+        obj[key.replace(/\s+/g, '_').toLowerCase()] = r[c];
+      }
+      if (Object.keys(obj).length) rows.push(obj);
+    }
+
+    const { errors, upserts } = validateRows(rows);
+    if (mode === 'commit' && errors.length === 0) {
+      await upsertCatalogItems(upserts);
+    }
+    return res.status(200).json({ ok: true, mode, upsertCount: upserts.length, errorCount: errors.length, errors });
+  } catch (e) {
+    console.error('sync-catalog-from-sheets error', e);
+    return res.status(200).json({ ok: false, error: String(e) });
+  }
+});
+
+// --- Admin: Export products as CSV for pricing seeding ---
+app.get('/admin/export-products-csv', async (req, res) => {
+  try {
+    if (SYNC_SHARED_SECRET) {
+      const token = req.get('X-Shared-Secret') || '';
+      if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+    }
+    // Read all products
+    const snap = await adminDb.collection('products').get();
+    const rows = [];
+    function esc(v) {
+      const s = (v === undefined || v === null) ? '' : String(v);
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) return '"' + s.replaceAll('"', '""') + '"';
+      return s;
+    }
+    rows.push(['SKU','Title','Type','Price','Currency','MOQ','Hero_URL','Image_Count','All_Images'].join(','));
+    for (const d of snap.docs) {
+      const p = d.data() || {};
+      const sku = p.sku || d.id;
+      const title = p.title || '';
+      const type = p.type || '';
+      const price = p.price || '';
+      const currency = p.currency || 'INR';
+      const moq = Number.isInteger(p.moq) ? p.moq : '';
+      const images = Array.isArray(p.images) ? p.images : [];
+      const heroIdx = Number.isInteger(p.hero_image_index) ? p.hero_image_index : 0;
+      const hero = images[heroIdx] || '';
+      const all = images.join(' ');
+      rows.push([esc(sku), esc(title), esc(type), esc(price), esc(currency), esc(moq), esc(hero), esc(images.length), esc(all)].join(','));
+    }
+    const csv = rows.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="products_export.csv"');
+    return res.status(200).send(csv);
+  } catch (e) {
+    console.error('export-products-csv error', e);
+    return res.status(200).json({ ok: false, error: String(e) });
+  }
+});
+
 function nowIso() { return new Date().toISOString(); }
 
 // --- Firestore-backed browse/detail (GCS indexed) ---
@@ -684,6 +767,15 @@ async function handleMessage(waUserId, text, rawMsg) {
         price = Number(prod.price || 0);
         currency = (prod.currency || 'INR').toUpperCase();
         moq = Number.isInteger(prod.moq) && prod.moq > 0 ? prod.moq : 1;
+        // Fallback to catalog if product doc lacks valid price
+        if (!Number.isFinite(price) || price <= 0) {
+          const legacy = await getCatalogItem(skuUpper);
+          if (legacy) {
+            price = Number(legacy.price || 0);
+            currency = (legacy.currency || currency || 'INR').toUpperCase();
+            moq = Number.isInteger(legacy.moq) && legacy.moq > 0 ? legacy.moq : moq;
+          }
+        }
       } else {
         const legacy = await getCatalogItem(skuUpper);
         if (legacy) {
@@ -693,6 +785,10 @@ async function handleMessage(waUserId, text, rawMsg) {
         } else {
           return sendText(to, 'Unknown SKU. Reply with SKU shown in the caption.');
         }
+      }
+
+      if (!Number.isFinite(price) || price <= 0) {
+        return sendText(to, `Price not set for ${skuUpper}. Please update the catalog price and try again.`);
       }
 
       if (qty % moq !== 0) {
@@ -898,10 +994,12 @@ function validateRows(rows) {
     const moq = parseInt(r.moq || '1', 10);
     if (!Number.isInteger(moq) || moq <= 0) { errors.push({ row: i+1, field: 'moq', error: 'invalid' }); continue; }
     const image_url = (r.image_url || r.imageUrl || '').toString().trim();
-    if (!image_url) { errors.push({ row: i+1, field: 'image_url', error: 'required' }); continue; }
+    // image_url is optional in the new flow; products images come from GCS indexer
     const title = (r.title || '').toString().trim();
     const active = !!(r.active === true || r.active === 'TRUE' || r.active === 'true' || r.active === 1);
-    upserts.push({ sku, title, category: r.category || '', price, currency, moq, sizes: r.sizes || [], colors: r.colors || [], image_url, active, updated_at: nowIso() });
+    const base = { sku, title, category: r.category || '', price, currency, moq, sizes: r.sizes || [], colors: r.colors || [], active, updated_at: nowIso() };
+    const up = image_url ? { ...base, image_url } : base;
+    upserts.push(up);
   }
   return { errors, upserts };
 }
