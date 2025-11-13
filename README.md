@@ -98,4 +98,4 @@ This project is proprietary and confidential.
 
 ## Support
 
-For support, please contact the development team at [your-email@example.com]
+For support, please contact the development team at [sandeshparjanya@minsfire.com](mailto:sandeshparjanya@minsfire.com)
