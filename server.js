@@ -769,7 +769,7 @@ async function handleMessage(waUserId, text, rawMsg) {
       return showProductsPage(to, sess.type || 'indian', sess.page);
     }
     if (lower.startsWith('view ')) {
-      const rawSku = (text || '').trim().slice(5).trim();
+      const rawSku = lower.slice(5).trim();
       const sku = rawSku ? rawSku.toLowerCase() : '';
       if (!sku) return sendText(to, "Usage: view <SKU>");
       sess.selected_product = sku;
@@ -880,7 +880,7 @@ async function handleMessage(waUserId, text, rawMsg) {
       return showProductsPage(to, sess.type || 'indian', sess.page || 0);
     }
     if (lower.startsWith('view ')) {
-      const rawSku2 = (text || '').trim().slice(5).trim();
+      const rawSku2 = lower.slice(5).trim();
       const sku2 = rawSku2 ? rawSku2.toLowerCase() : '';
       if (!sku2) return sendText(to, "Usage: view <SKU>");
       sess.selected_product = sku2;
