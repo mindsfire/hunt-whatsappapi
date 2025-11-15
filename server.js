@@ -623,7 +623,10 @@ async function handleMessage(waUserId, text, rawMsg) {
   try {
     if (rawMsg && rawMsg.type === 'interactive' && rawMsg.interactive) {
       const it = rawMsg.interactive;
-      const id = (it.button_reply && it.button_reply.id) || (it.list_reply && it.list_reply.id) || '';
+      const btn = it.button_reply;
+      const lst = it.list_reply;
+      const id = (btn && btn.id) || (lst && lst.id) || '';
+      const title = (btn && btn.title) || (lst && lst.title) || '';
       if (id && typeof id === 'string') {
         const idLower = id.toLowerCase();
         if (idLower.startsWith('view_')) {
@@ -649,6 +652,18 @@ async function handleMessage(waUserId, text, rawMsg) {
         } else if (idLower.startsWith('qtyplus_')) {
           const sku = idLower.slice(8);
           lower = `add ${sku} 1`;
+        } else if (idLower === 'checkout') {
+          lower = 'checkout';
+        }
+      } else if (title) {
+        const tLower = title.toLowerCase().trim();
+        // If the list title is the SKU (we render SKU in list title), map it to view <sku>
+        if (/^[a-z0-9\-_.]+$/i.test(tLower) && tLower.includes('-')) {
+          lower = `view ${tLower}`;
+        } else if (tLower === 'view' && sess.last_browse_sku) {
+          lower = `view ${sess.last_browse_sku}`;
+        } else if (tLower === 'add to cart' && sess.last_browse_sku) {
+          lower = `add ${sess.last_browse_sku} 1`;
         }
       }
     }
@@ -658,9 +673,26 @@ async function handleMessage(waUserId, text, rawMsg) {
     return sendHelp(to, sess);
   }
 
-  if ((lower === 'view' || lower === 'add to cart' || lower === 'add') && sess.last_browse_sku) {
-    if (lower === 'view') lower = `view ${sess.last_browse_sku}`;
-    else lower = `add ${sess.last_browse_sku} 1`;
+  // Global cart view / checkout shortcuts (work from any state)
+  if (lower === 'cart' || lower === 'view cart') {
+    const cart = await dbGetCart(waUserId);
+    const items = cart.items || [];
+    const total = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    const lines = items.map(i => `• ${i.sku} x ${i.qty} = ${i.qty * i.unit_price}`);
+    return sendText(to, ['Your cart:', ...lines, `Total: ${total}`].join('\n'));
+  }
+  if (lower === 'checkout') {
+    sess.state = 'business';
+    await dbSaveSession(waUserId, sess);
+    return sendText(to, 'Please share your Business Name (reply: biz <name>).');
+  }
+
+  if (lower === 'view' || lower === 'add to cart' || lower === 'add') {
+    const prefSku = (sess.selected_product && sess.selected_product.trim()) || (sess.last_browse_sku && sess.last_browse_sku.trim()) || '';
+    if (prefSku) {
+      if (lower === 'view') lower = `view ${prefSku}`;
+      else lower = `add ${prefSku} 1`;
+    }
   }
 
   // Global escape routes to avoid getting stuck
@@ -861,6 +893,64 @@ async function handleMessage(waUserId, text, rawMsg) {
   if (sess.state === 'detail') {
     if (lower === 'more images' || lower === 'more' || lower === 'images') {
       return sendMoreImages(to, sess);
+    }
+    if (lower.startsWith('add ')) {
+      // Allow adding from detail view as well
+      const parts = lower.split(/\s+/);
+      const skuRaw = (parts[1] || '').trim();
+      const skuLower = skuRaw.toLowerCase();
+      const skuUpper = skuRaw.toUpperCase();
+      const qty = parseInt(parts[2] || '0', 10);
+      if (!Number.isInteger(qty) || qty <= 0) return sendText(to, 'Please provide a valid quantity.');
+
+      let price = 0;
+      let currency = 'INR';
+      let moq = 1;
+      let skuForCart = skuUpper;
+      const prod = await getProductDoc(skuLower);
+      if (prod) {
+        price = Number(prod.price || 0);
+        currency = (prod.currency || 'INR').toUpperCase();
+        moq = Number.isInteger(prod.moq) && prod.moq > 0 ? prod.moq : 1;
+        if (!Number.isFinite(price) || price <= 0) {
+          const legacy = await getCatalogItem(skuUpper);
+          if (legacy) {
+            price = Number(legacy.price || 0);
+            currency = (legacy.currency || currency || 'INR').toUpperCase();
+            moq = Number.isInteger(legacy.moq) && legacy.moq > 0 ? legacy.moq : moq;
+          }
+        }
+      } else {
+        const legacy = await getCatalogItem(skuUpper);
+        if (legacy) {
+          price = Number(legacy.price || 0);
+          currency = (legacy.currency || 'INR').toUpperCase();
+          moq = Number.isInteger(legacy.moq) && legacy.moq > 0 ? legacy.moq : 1;
+        } else {
+          return sendText(to, 'Unknown SKU. Reply with SKU shown in the caption.');
+        }
+      }
+      if (!Number.isFinite(price) || price <= 0) {
+        return sendText(to, `Price not set for ${skuUpper}. Please update the catalog price and try again.`);
+      }
+      const cart = await dbGetCart(waUserId);
+      cart.items = cart.items || [];
+      const existing = cart.items.find(i => i.sku === skuForCart);
+      if (existing) {
+        existing.qty += qty;
+        existing.unit_price = price || existing.unit_price;
+        existing.currency = currency || existing.currency || 'INR';
+      } else {
+        cart.items.push({ sku: skuForCart, qty, unit_price: price, currency });
+      }
+      cart.currency = currency || cart.currency || 'INR';
+      await dbSaveCart(waUserId, cart);
+      await sendText(to, `Added ${qty} of ${skuForCart} to cart.`);
+      return sendButtons(to, 'Next steps', [
+        { type: 'reply', reply: { id: `qtyplus_${skuLower}`, title: '+1 set' } },
+        { type: 'reply', reply: { id: 'cart_view', title: 'View cart' } },
+        { type: 'reply', reply: { id: 'checkout', title: 'Checkout' } }
+      ]);
     }
     if (lower === 'browse' || lower === 'catalog') {
       sess.state = 'browse';
