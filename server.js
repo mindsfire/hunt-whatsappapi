@@ -5,6 +5,7 @@ import process from 'process';
 import { google } from 'googleapis';
 import { Storage } from '@google-cloud/storage';
 import { Firestore } from '@google-cloud/firestore';
+import { t } from './locales.js';
 import {
   initDb,
   getSession as dbGetSession,
@@ -33,10 +34,23 @@ const SYNC_SHARED_SECRET = process.env.SYNC_SHARED_SECRET || '';
 const SALES_SHEET_ID = process.env.SALES_SHEET_ID || '';
 // Media/GCS/WhatsApp media upload
 const MEDIA_BUCKET = process.env.MEDIA_BUCKET || '';
-const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/+$|^\.$/g, ''); // e.g. 'media'
+const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/+$/g, ''); // e.g. 'media'
 const MEDIA_HERO_SUFFIX = process.env.MEDIA_HERO_SUFFIX || '-1.jpg';
 const MEDIA_BATCH_SIZE = parseInt(process.env.MEDIA_BATCH_SIZE || '3', 10);
 const WA_WABA_ID = process.env.WA_WABA_ID || '';
+
+// Locale-specific yes/no keywords for intent recognition
+// This keeps business logic independent of specific UI text and makes it easy to add locales.
+const YES_NO_KEYWORDS = {
+  en: {
+    yes: ['yes', 'y', 'confirm'],
+    no: ['no', 'n', 'cancel']
+  },
+  kn: {
+    yes: ['ಹೌದು', 'ಸಮ್ಮತಿಸಿ'],
+    no: ['ಇಲ್ಲ', 'ರದ್ದು']
+  }
+};
 
 // --- Firestore init ---
 initDb();
@@ -134,21 +148,37 @@ async function getTypes() {
   return Array.isArray(data.types) && data.types.length ? data.types : ['indian','imported'];
 }
 
+const TYPE_DISPLAY_NAMES = {
+  en: {
+    indian: 'Indian',
+    imported: 'Imported'
+  },
+  kn: {
+    indian: 'Indian (ಇಂಡಿಯನ್)',
+    imported: 'Imported (ಇಂಪೋರ್ಟೆಡ್)'
+  }
+};
+
 async function showTypes(to, sess) {
   const types = await getTypes();
   const lang = (sess && (sess.language || sess.locale)) || 'en';
   // If only two, send buttons; else send text list
   if (types.length <= 3) {
-    const buttons = types.map(t => ({ type: 'reply', reply: { id: `type_${t}`, title: t.charAt(0).toUpperCase() + t.slice(1) } }));
-    buttons.push({ type: 'reply', reply: { id: 'type_help', title: lang === 'kn' ? 'ಸಹಾಯ' : 'Help' } });
-    const body = lang === 'kn'
-      ? 'ದಯವಿಟ್ಟು ಕ್ಯಾಟಗರಿ ಆಯ್ಕೆಮಾಡಿ'
-      : 'Choose a type to browse';
+    const displayMap = TYPE_DISPLAY_NAMES[lang] || TYPE_DISPLAY_NAMES.en || {};
+    const buttons = types.map(t => ({
+      type: 'reply',
+      reply: {
+        id: `type_${t}`,
+        title: displayMap[t] || t
+      }
+    }));
+    buttons.push({ type: 'reply', reply: { id: 'type_help', title: t(lang, 'BUTTON_HELP') } });
+    const body = t(lang, 'TYPES_CHOOSE');
     return sendButtons(to, body, buttons);
   }
-  const body = lang === 'kn'
-    ? `ಲಭ್ಯವಿರುವ ಕ್ಯಾಟಗರಿಗಳು:\n- ${types.join('\n- ')}\nಉದಾಹರಣೆ: Indian ಎಂದು ಟೈಪ್ ಮಾಡಿ.`
-    : `Available types:\n- ${types.join('\n- ')}\nReply with a type name (e.g., Indian).`;
+  const displayMap = TYPE_DISPLAY_NAMES[lang] || TYPE_DISPLAY_NAMES.en || {};
+  const typeList = types.map(t => displayMap[t] || t).join('\n- ');
+  const body = t(lang, 'TYPES_LIST', { types: typeList });
   return sendText(to, body);
 }
 
@@ -162,17 +192,13 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
   const lang = (sessForLang && (sessForLang.language || sessForLang.locale)) || 'en';
   const items = await getProductsByType(type);
   if (!items.length) {
-    const msg = lang === 'kn'
-      ? `ಈ '${type}' ಕ್ಯಾಟಗರಿಯಲ್ಲಿ ಯಾವುದೇ ಉತ್ಪನ್ನಗಳು ಇಲ್ಲ. ಮತ್ತೆ ಆಯ್ಕೆಮಾಡಲು 'types' ಎಂದು ಟೈಪ್ ಮಾಡಿ.`
-      : `No products for type '${type}'. Reply 'types' to choose again.`;
+    const msg = t(lang, 'NO_PRODUCTS_FOR_TYPE', { type });
     return sendText(to, msg);
   }
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   const p = Math.min(Math.max(0, page), totalPages - 1);
   const slice = items.slice(p * pageSize, p * pageSize + pageSize);
-  const header = lang === 'kn'
-    ? `Products (${type}) page ${p + 1}/${totalPages}`
-    : `Products (${type}) page ${p + 1}/${totalPages}`;
+  const header = t(lang, 'PRODUCTS_PAGE_HEADER', { type, page: p + 1, totalPages });
   // Check if user has items in cart to show 'View cart' button
   let hasCart = false;
   try {
@@ -198,15 +224,13 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
         } catch (_) {}
         // Add per-product quick actions
         const actions = [
-          { type: 'reply', reply: { id: `view_${sku}`, title: lang === 'kn' ? 'ವೀಕ್ಷಿಸಿ' : 'View' } },
-          { type: 'reply', reply: { id: `add_${sku}`, title: lang === 'kn' ? 'Add to cart' : 'Add to cart' } }
+          { type: 'reply', reply: { id: `view_${sku}`, title: t(lang, 'BUTTON_VIEW') } },
+          { type: 'reply', reply: { id: `add_${sku}`, title: t(lang, 'BUTTON_ADD_TO_CART') } }
         ];
         if (hasCart && actions.length < 3) {
-          actions.push({ type: 'reply', reply: { id: 'cart_view', title: lang === 'kn' ? 'View cart' : 'View cart' } });
+          actions.push({ type: 'reply', reply: { id: 'cart_view', title: t(lang, 'BUTTON_VIEW_CART') } });
         }
-        const body = lang === 'kn'
-          ? (it.title || 'ಕ್ರಿಯೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ')
-          : (it.title || 'Choose action');
+        const body = (it.title || '');
         await sendButtons(to, body, actions);
       }
     } catch (_) {}
@@ -218,29 +242,25 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
     description: `${it.title || ''}`.trim() || `${it.image_count || 0} images`
   }));
   // WhatsApp list supports up to 10 rows. Our page size is <= 4, safe.
-  await sendList(to, header, lang === 'kn' ? 'SKU ಆಯ್ಕೆಮಾಡಿ' : 'Choose SKU', `Page ${p + 1}`, rows);
+  await sendList(to, header, t(lang, 'BUTTON_CHOOSE_SKU'), t(lang, 'PRODUCTS_PAGE_TITLE', { page: p + 1, totalPages }), rows);
   // Add paging buttons for easier navigation
   {
     const pageBtns = [
-      { type: 'reply', reply: { id: 'page_prev', title: lang === 'kn' ? 'Prev' : 'Prev' } },
-      { type: 'reply', reply: { id: 'page_next', title: lang === 'kn' ? 'Next' : 'Next' } },
-      { type: 'reply', reply: { id: 'page_types', title: lang === 'kn' ? 'Types' : 'Types' } }
+      { type: 'reply', reply: { id: 'page_prev', title: t(lang, 'BUTTON_PREV') } },
+      { type: 'reply', reply: { id: 'page_next', title: t(lang, 'BUTTON_NEXT') } },
+      { type: 'reply', reply: { id: 'page_types', title: t(lang, 'BUTTON_TYPES') } }
     ];
     if (hasCart && pageBtns.length < 3) {
       // Note: buttons max 3; if we already have 3, skip adding cart here
     } else if (hasCart) {
       // Replace 'Types' with 'View cart' to stay within 3 buttons
-      pageBtns[2] = { type: 'reply', reply: { id: 'cart_view', title: lang === 'kn' ? 'View cart' : 'View cart' } };
+      pageBtns[2] = { type: 'reply', reply: { id: 'cart_view', title: t(lang, 'BUTTON_VIEW_CART') } };
     }
-    const pgBody = lang === 'kn'
-      ? `Page ${p + 1}/${totalPages}`
-      : `Page ${p + 1}/${totalPages}`;
+    const pgBody = t(lang, 'PRODUCTS_PAGE_TITLE', { page: p + 1, totalPages });
     await sendButtons(to, pgBody, pageBtns);
   }
   // Follow-up instructions (text fallback)
-  const tip = lang === 'kn'
-    ? "Tip: ಪುಟ ಬದಲಾಯಿಸಲು ಬಟನ್‌ಗಳನ್ನು ಬಳಸಿ. 'next'/'prev' ಅಥವಾ 'view <SKU>' ಅನ್ನು ಟೈಪ್ ಮಾಡಬಹುದು."
-    : "Tip: Use buttons for paging. You can also type 'next'/'prev' or 'view <SKU>'.";
+  const tip = t(lang, 'PAGE_TIP');
   return sendText(to, tip);
 }
 
@@ -253,23 +273,22 @@ async function showProductDetail(to, sku, sess) {
   const p = await getProductDoc(sku);
   const lang = (sess && (sess.language || sess.locale)) || 'en';
   if (!p) {
-    const msg = lang === 'kn'
-      ? `Unknown SKU ${sku}. ಮತ್ತೆ ನೋಡಲು 'browse' ಎಂದು ಟೈಪ್ ಮಾಡಿ.`
-      : `Unknown SKU ${sku}. Reply 'browse' to list again.`;
+    const msg = t(lang, 'DETAIL_UNKNOWN_SKU', { sku });
     return sendText(to, msg);
   }
   const images = Array.isArray(p.images) ? p.images : [];
   if (!images.length) {
-    const msg = lang === 'kn'
-      ? `${sku}: ಯಾವುದೇ ಚಿತ್ರಗಳು ಇಲ್ಲ.`
-      : `${sku}: No images.`;
+    const msg = t(lang, 'DETAIL_NO_IMAGES', { sku });
     return sendText(to, msg);
   }
   const heroIdx = Number.isInteger(p.hero_image_index) ? p.hero_image_index : 0;
   const heroPath = images[heroIdx];
-  const caption = lang === 'kn'
-    ? `${sku}${p.title ? ' | ' + p.title : ''}\nImages: ${images.length}\nಹೆಚ್ಚು ಚಿತ್ರಗಳಿಗೆ 'more images' ಎಂದು, ಕಾರ್ಟಿಗೆ ಸೇರಿಸಲು 'add ${sku} <QTY>' ಎಂದು ಟೈಪ್ ಮಾಡಿ.`
-    : `${sku}${p.title ? ' | ' + p.title : ''}\nImages: ${images.length}\nReply 'more images' to see more, or 'add ${sku} <QTY>' to add to cart.`;
+  const titlePart = p.title ? ' | ' + p.title : '';
+  const caption = t(lang, 'DETAIL_CAPTION', {
+    sku,
+    titlePart,
+    imageCount: images.length
+  });
   try {
     const mediaId = await getOrCreateMediaIdForGcsPath(heroPath);
     await sendImageByMediaId(to, mediaId, caption);
@@ -287,14 +306,12 @@ async function sendMoreImages(to, sess) {
   const sku = sess.selected_product;
   const lang = (sess && (sess.language || sess.locale)) || 'en';
   if (!sku) {
-    const msg = lang === 'kn'
-      ? 'ಯಾವುದೇ ಉತ್ಪನ್ನ ಆಯ್ಕೆಮಾಡಿಲ್ಲ. view <SKU> ಬಳಸಿ.'
-      : 'No product selected. Use view <SKU>.';
+    const msg = t(lang, 'DETAIL_NO_SELECTED_PRODUCT');
     return sendText(to, msg);
   }
   const p = await getProductDoc(sku);
   if (!p || !Array.isArray(p.images) || !p.images.length) {
-    const msg = lang === 'kn' ? 'ಮತ್ತಷ್ಟು ಚಿತ್ರಗಳು ಇಲ್ಲ.' : 'No more images.';
+    const msg = t(lang, 'DETAIL_NO_MORE_IMAGES');
     return sendText(to, msg);
   }
   const heroIdx = Number.isInteger(p.hero_image_index) ? p.hero_image_index : 0;
@@ -303,7 +320,7 @@ async function sendMoreImages(to, sess) {
   const start = sess.images_offset || 0;
   const end = Math.min(rest.length, start + MEDIA_BATCH_SIZE);
   if (start >= rest.length) {
-    const msg = lang === 'kn' ? 'ಮತ್ತಷ್ಟು ಚಿತ್ರಗಳು ಇಲ್ಲ.' : 'No more images.';
+    const msg = t(lang, 'DETAIL_NO_MORE_IMAGES');
     return sendText(to, msg);
   }
   const batch = rest.slice(start, end);
@@ -318,12 +335,10 @@ async function sendMoreImages(to, sess) {
   sess.images_offset = end;
   await dbSaveSession(to, sess);
   if (end < rest.length) {
-    const msg = lang === 'kn'
-      ? `Sent ${batch.length}. ಇನ್ನಷ್ಟು ಚಿತ್ರಗಳಿಗೆ 'more images' ಎಂದು ಟೈಪ್ ಮಾಡಿ.`
-      : `Sent ${batch.length}. Reply 'more images' for more.`;
+    const msg = t(lang, 'DETAIL_SENT_MORE_IMAGES', { count: batch.length });
     return sendText(to, msg);
   } else {
-    const msg = lang === 'kn' ? 'ಎಲ್ಲಾ ಚಿತ್ರಗಳನ್ನು ಕಳುಹಿಸಲಾಗಿದೆ.' : 'All images sent.';
+    const msg = t(lang, 'DETAIL_ALL_IMAGES_SENT');
     return sendText(to, msg);
   }
 }
@@ -648,45 +663,24 @@ async function sendHelp(to, sess) {
   const state = sess && sess.state ? sess.state : 'start';
   const lang = (sess && (sess.language || sess.locale)) || 'en';
   if (state === 'start' || state === 'ask_mode') {
-    const msg = lang === 'kn'
-      ? "ನೀವು ಬಿಸಿನೆಸ್ / ರೀಸೆಲ್‌ಗಾಗಿ ಖರೀದಿಸುತ್ತಿದ್ದರೆ Wholesale ಆಯ್ಕೆಮಾಡಿ. Retail ಅನ್ನು ಬಿಸಿನೆಸ್ ಖರೀದಿಗರಿಗೆ ಮಾತ್ರ ಬಳಸಬಹುದು. 'Wholesale' ಎಂದು ಟೈಪ್ ಮಾಡಬಹುದು ಅಥವಾ ಬಟನ್ ಬಳಸಿ."
-      : "Choose Wholesale if you're buying for business/resale. Choose Retail only if you're a business buyer. Reply 'Wholesale' or use the buttons.";
-    return sendText(to, msg);
+    return sendText(to, t(lang, 'ASK_MODE_HELP'));
   }
   if (state === 'types') {
-    const msg = lang === 'kn'
-      ? "Indian ಅಥವಾ Imported ಹಾಗು ಯಾವುದೇ ಕ್ಯಾಟಗರಿ ಆಯ್ಕೆಮಾಡಿ. ನಾವು ಚಿತ್ರಗಳೊಂದಿಗೆ ಉತ್ಪನ್ನಗಳನ್ನು ತೋರಿಸುತ್ತೇವೆ. ನಂತರ ಕೂಡ 'types' ಎಂದು ಟೈಪ್ ಮಾಡಿ ಬದಲಾಯಿಸಬಹುದು."
-      : "Select a category like Indian or Imported. We'll show products with images. You can change later by typing 'types'.";
-    return sendText(to, msg);
+    return sendText(to, t(lang, 'TYPES_HELP'));
   }
   if (state === 'browse') {
-    const msg = lang === 'kn'
-      ? "Prev/Next ಬಳಸಿ ಪುಟಗಳನ್ನು ಬದಲಾಯಿಸಿ. ವಿವರಗಳಿಗೆ 'view <SKU>', ಕಾರ್ಟಿಗೆ ಸೇರಿಸಲು 'add <SKU> <QTY>', ಕಾರ್ಟ್ ನೋಡಲು 'cart', ಆರ್ಡರ್ ಮಾಡಲು 'checkout' ಬಳಸಿ."
-      : "Use Prev/Next to page. Type 'view <SKU>' for details, 'add <SKU> <QTY>' to add to cart, 'cart' to view cart, 'checkout' to place order.";
-    return sendText(to, msg);
+    return sendText(to, t(lang, 'BROWSE_HELP'));
   }
   if (state === 'detail') {
-    const msg = lang === 'kn'
-      ? "ಹೆಚ್ಚು ಚಿತ್ರಗಳಿಗೆ 'more images', ಲಿಸ್ಟಿಗೆ ಮರಳಲು 'browse', ಕಾರ್ಟಿಗೆ ಸೇರಿಸಲು 'add <SKU> <QTY>', ಕ್ಯಾಟಗರಿ ಬದಲಾಯಿಸಲು 'types' ಬಳಸಿ."
-      : "Reply 'more images' to see more, 'browse' to return to list, 'add <SKU> <QTY>' to add to cart, 'types' to change category.";
-    return sendText(to, msg);
+    return sendText(to, t(lang, 'DETAIL_HELP'));
   }
   if (state === 'business') {
-    const msg = lang === 'kn'
-      ? "ನಿಮ್ಮ ಬಿಸಿನೆಸ್ ಹೆಸರನ್ನು ರಿಪ್ಲೈ ಮಾಡಿ (ಉದಾಹರಣೆ: biz Mindsfire)."
-      : "Reply your Business Name (e.g., biz Mindsfire).";
-    return sendText(to, msg);
+    return sendText(to, t(lang, 'BUSINESS_PROMPT'));
   }
   if (state === 'confirm') {
-    const msg = lang === 'kn'
-      ? "ಆರ್ಡರ್ ಮಾಡಲು Confirm, ರದ್ದುಗೊಳಿಸಲು Cancel ಒತ್ತಿ."
-      : "Press Confirm to place the order or Cancel to discard.";
-    return sendText(to, msg);
+    return sendText(to, t(lang, 'CONFIRM_HELP'));
   }
-  const msg = lang === 'kn'
-    ? "ಪ್ರಾರಂಭಿಸಲು 'Wholesale' ಎಂದು ಟೈಪ್ ಮಾಡಿ, ಅಥವಾ ಕ್ಯಾಟಗರಿ ನೋಡಲು 'types' ಬಳಸಿ. ಯಾವಾಗ ಬೇಕಾದರೂ 'help' ಎಂದು ಟೈಪ್ ಮಾಡಬಹುದು."
-    : "Type 'Wholesale' to start, or 'types' to browse categories. You can type 'help' anytime.";
-  return sendText(to, msg);
+  return sendText(to, t(lang, 'HELP_FALLBACK'));
 }
 
 // --- Simple state machine ---
@@ -731,6 +725,12 @@ async function handleMessage(waUserId, text, rawMsg) {
           lower = `add ${sku} 1`;
         } else if (idLower === 'checkout') {
           lower = 'checkout';
+        } else if (idLower === 'b2b_no' || idLower === 'b2b_yes') {
+          // B2B gate buttons
+          lower = idLower;
+        } else if (idLower === 'confirm_yes' || idLower === 'confirm_no') {
+          // Order confirmation buttons
+          lower = idLower;
         } else if (idLower === 'lang_en') {
           lower = 'lang en';
         } else if (idLower === 'lang_kn') {
@@ -761,19 +761,17 @@ async function handleMessage(waUserId, text, rawMsg) {
     const total = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
     const lines = items.map(i => `• ${i.sku} x ${i.qty} = ${i.qty * i.unit_price}`);
     if (!items.length) {
-      const msgEmpty = lang === 'kn' ? 'ನಿಮ್ಮ ಕಾರ್ಟ್ ಖಾಲಿ ಇದೆ.' : 'Your cart is empty.';
+      const msgEmpty = t(lang, 'CART_EMPTY');
       return sendText(to, msgEmpty);
     }
-    const header = lang === 'kn' ? 'ನಿಮ್ಮ ಕಾರ್ಟ್:' : 'Your cart:';
-    const totalLine = lang === 'kn' ? `Total: ${total}` : `Total: ${total}`;
+    const header = t(lang, 'CART_HEADER');
+    const totalLine = t(lang, 'CART_TOTAL_LINE', { total });
     return sendText(to, [header, ...lines, totalLine].join('\n'));
   }
   if (lower === 'checkout') {
     sess.state = 'business';
     await dbSaveSession(waUserId, sess);
-    const msg = lang === 'kn'
-      ? 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಬಿಸಿನೆಸ್ ಹೆಸರನ್ನು ಕಳುಹಿಸಿ (ಉದಾಹರಣೆ: biz <name>).'
-      : 'Please share your Business Name (reply: biz <name>).';
+    const msg = t(lang, 'BUSINESS_PROMPT');
     return sendText(to, msg);
   }
 
@@ -806,18 +804,16 @@ async function handleMessage(waUserId, text, rawMsg) {
     if (!sess.language) {
       sess.state = 'lang_select';
       await dbSaveSession(waUserId, sess);
-      return sendButtons(to, 'Choose your language / ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ', [
+      return sendButtons(to, t('en', 'LANG_GATE_PROMPT'), [
         { type: 'reply', reply: { id: 'lang_en', title: 'English' } },
         { type: 'reply', reply: { id: 'lang_kn', title: 'ಕನ್ನಡ' } }
       ]);
     }
     sess.state = 'ask_mode';
     await dbSaveSession(waUserId, sess);
-    const body = lang === 'kn'
-      ? 'ನೀವು Wholesale ಅಥವಾ Retail ಖರೀದಿಗರಾ?'
-      : 'Welcome! Are you buying Wholesale or Retail?';
-    const wholesaleTitle = lang === 'kn' ? 'Wholesale' : 'Wholesale';
-    const retailTitle = lang === 'kn' ? 'Retail' : 'Retail';
+    const body = t(lang, 'ASK_MODE_PROMPT');
+    const wholesaleTitle = t(lang, 'BUTTON_MODE_WHOLESALE');
+    const retailTitle = t(lang, 'BUTTON_MODE_RETAIL');
     return sendButtons(to, body, [
       { type: 'reply', reply: { id: 'mode_wholesale', title: wholesaleTitle } },
       { type: 'reply', reply: { id: 'mode_retail', title: retailTitle } }
@@ -830,24 +826,24 @@ async function handleMessage(waUserId, text, rawMsg) {
       sess.language = 'en';
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
-      return sendButtons(to, 'Welcome! Are you buying Wholesale or Retail?', [
-        { type: 'reply', reply: { id: 'mode_wholesale', title: 'Wholesale' } },
-        { type: 'reply', reply: { id: 'mode_retail', title: 'Retail' } }
+      return sendButtons(to, t('en', 'ASK_MODE_PROMPT'), [
+        { type: 'reply', reply: { id: 'mode_wholesale', title: t('en', 'BUTTON_MODE_WHOLESALE') } },
+        { type: 'reply', reply: { id: 'mode_retail', title: t('en', 'BUTTON_MODE_RETAIL') } }
       ]);
     }
     if (lower === 'lang kn' || lower === 'kannada' || lower === 'ಕನ್ನಡ') {
       sess.language = 'kn';
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
-      return sendButtons(to, 'ನೀವು Wholesale ಅಥವಾ Retail ಖರೀದಿಗರಾ?', [
-        { type: 'reply', reply: { id: 'mode_wholesale', title: 'Wholesale' } },
-        { type: 'reply', reply: { id: 'mode_retail', title: 'Retail' } }
+      return sendButtons(to, t('kn', 'ASK_MODE_PROMPT'), [
+        { type: 'reply', reply: { id: 'mode_wholesale', title: t('kn', 'BUTTON_MODE_WHOLESALE') } },
+        { type: 'reply', reply: { id: 'mode_retail', title: t('kn', 'BUTTON_MODE_RETAIL') } }
       ]);
     }
     // Re-show language selector on any other input
-    return sendButtons(to, 'Choose your language / ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ', [
-      { type: 'reply', reply: { id: 'lang_en', title: 'English' } },
-      { type: 'reply', reply: { id: 'lang_kn', title: 'ಕನ್ನಡ' } }
+    return sendButtons(to, t('en', 'LANG_GATE_PROMPT'), [
+      { type: 'reply', reply: { id: 'lang_en', title: t('en', 'BUTTON_LANG_EN') } },
+      { type: 'reply', reply: { id: 'lang_kn', title: t('en', 'BUTTON_LANG_KN') } }
     ]);
   }
 
@@ -863,43 +859,44 @@ async function handleMessage(waUserId, text, rawMsg) {
       sess.mode = 'retail';
       sess.state = 'b2b_gate';
       await dbSaveSession(waUserId, sess);
-      const body = lang === 'kn'
-        ? 'ನಾವು ಪ್ರಸ್ತುತ ಹೋಲ್‌ಸೇಲ್ ಬಿಸಿನೆಸ್ ಖರೀದಿಗರಿಗೆ ಮಾತ್ರ ಸೇವೆ ನೀಡುತ್ತೇವೆ. ನೀವು ಬಿಸಿನೆಸ್ / ರೀಸೆಲ್‌ಗಾಗಿ ಖರೀದಿಸುತ್ತಿದ್ದೀರಾ?'
-        : 'We currently serve Wholesale buyers. Are you buying for a business/resale?';
-      const noTitle = lang === 'kn' ? 'No' : 'No';
-      const yesTitle = lang === 'kn' ? 'I am Wholeseller' : 'I am Wholeseller';
+      const body = t(lang, 'B2B_GATE_PROMPT');
+      const noTitle = t(lang, 'BUTTON_B2B_NO');
+      const yesTitle = t(lang, 'BUTTON_B2B_YES');
       return sendButtons(to, body, [
         { type: 'reply', reply: { id: 'b2b_no', title: noTitle } },
         { type: 'reply', reply: { id: 'b2b_yes', title: yesTitle } }
       ]);
     }
-    const msg = lang === 'kn'
-      ? 'ದಯವಿಟ್ಟು Wholesale ಅಥವಾ Retail ಆಯ್ಕೆಮಾಡಿ.'
-      : 'Please choose Wholesale or Retail.';
-    return sendText(to, msg);
+    return sendText(to, t(lang, 'ASK_MODE_CHOOSE'));
   }
 
   // B2B gate confirmation
   if (sess.state === 'b2b_gate') {
-    if (lower.includes('b2b_yes') || lower === 'yes' || lower.includes('yes')) {
+    const kw = YES_NO_KEYWORDS[lang] || YES_NO_KEYWORDS.en;
+    const yesWords = kw.yes || YES_NO_KEYWORDS.en.yes;
+    const noWords = kw.no || YES_NO_KEYWORDS.en.no;
+
+    const isYes =
+      lower.includes('b2b_yes') ||
+      yesWords.some(w => lower === w || lower.includes(w));
+    const isNo =
+      lower.includes('b2b_no') ||
+      noWords.some(w => lower === w || lower.includes(w));
+
+    if (isYes) {
       sess.mode = 'wholesale';
       sess.state = 'types';
       await dbSaveSession(waUserId, sess);
       return showTypes(to, sess);
     }
-    if (lower.includes('b2b_no') || lower === 'no') {
+    if (isNo) {
       sess.state = 'start';
       await dbSaveSession(waUserId, sess);
-      const msg = lang === 'kn'
-        ? "ಧನ್ಯವಾದಗಳು! ನಾವು ಪ್ರಸ್ತುತ ಬಿಸಿನೆಸ್‌ಗೆ ಮಾತ್ರ ಮಾರಾಟ ಮಾಡುತ್ತೇವೆ. ನೀವು ಬಿಸಿನೆಸ್ ಪ್ರತಿನಿಧಿಸುತ್ತಿದ್ದರೆ ಮುಂದುವರಿಸಲು 'Wholesale' ಎಂದು ಟೈಪ್ ಮಾಡಿ."
-        : "Thanks for your interest! We currently sell to businesses only. If you represent a business, reply 'Wholesale' to continue.";
-      return sendText(to, msg);
+      return sendText(to, t(lang, 'B2B_GATE_THANKS_NO'));
     }
-    const body = lang === 'kn'
-      ? 'ನೀವು Wholesale (ಬಿಸಿನೆಸ್) ಖರೀದಿಗರಾ?'
-      : 'Are you a Wholesale (business) buyer?';
-    const noTitle = lang === 'kn' ? 'No' : 'No';
-    const yesTitle = lang === 'kn' ? 'I am Wholeseller' : 'I am Wholeseller';
+    const body = t(lang, 'B2B_GATE_QUESTION');
+    const noTitle = t(lang, 'BUTTON_B2B_NO');
+    const yesTitle = t(lang, 'BUTTON_B2B_YES');
     return sendButtons(to, body, [
       { type: 'reply', reply: { id: 'b2b_no', title: noTitle } },
       { type: 'reply', reply: { id: 'b2b_yes', title: yesTitle } }
@@ -952,7 +949,7 @@ async function handleMessage(waUserId, text, rawMsg) {
       const rawSku = lower.slice(5).trim();
       const sku = rawSku ? rawSku.toLowerCase() : '';
       if (!sku) {
-        const msg = lang === 'kn' ? "Usage: view <SKU>" : "Usage: view <SKU>";
+        const msg = t(lang, 'USAGE_VIEW_SKU');
         return sendText(to, msg);
       }
       sess.selected_product = sku;
@@ -969,9 +966,7 @@ async function handleMessage(waUserId, text, rawMsg) {
       const skuUpper = skuRaw.toUpperCase();
       const qty = parseInt(parts[2] || '0', 10);
       if (!Number.isInteger(qty) || qty <= 0) {
-        const msg = lang === 'kn'
-          ? 'ದಯವಿಟ್ಟು ಸರಿಯಾದ QTY ಅನ್ನು ನೀಡಿ.'
-          : 'Please provide a valid quantity.';
+        const msg = t(lang, 'INVALID_QTY');
         return sendText(to, msg);
       }
 
@@ -1001,17 +996,13 @@ async function handleMessage(waUserId, text, rawMsg) {
           currency = (legacy.currency || 'INR').toUpperCase();
           moq = Number.isInteger(legacy.moq) && legacy.moq > 0 ? legacy.moq : 1;
         } else {
-          const msg = lang === 'kn'
-            ? 'Unknown SKU. ಕ್ಯಾಪ್ಶನ್‌ನಲ್ಲಿ ತೋರಿಸಿರುವ SKU ಅನ್ನು ರಿಪ್ಲೈ ಮಾಡಿ.'
-            : 'Unknown SKU. Reply with SKU shown in the caption.';
+          const msg = t(lang, 'UNKNOWN_SKU_CAPTION');
           return sendText(to, msg);
         }
       }
 
       if (!Number.isFinite(price) || price <= 0) {
-        const msg = lang === 'kn'
-          ? `Price not set for ${skuUpper}. ದಯವಿಟ್ಟು ಕ್ಯಾಟಲಾಗ್ ಬೆಲೆ ಅಪ್ಡೇಟ್ ಮಾಡಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.`
-          : `Price not set for ${skuUpper}. Please update the catalog price and try again.`;
+        const msg = t(lang, 'PRICE_NOT_SET', { sku: skuUpper });
         return sendText(to, msg);
       }
 
@@ -1029,15 +1020,13 @@ async function handleMessage(waUserId, text, rawMsg) {
       }
       cart.currency = currency || cart.currency || 'INR';
       await dbSaveCart(waUserId, cart);
-      const addedMsg = lang === 'kn'
-        ? `${skuForCart} ಇಂದ ${qty} ಕಾರ್ಟಿಗೆ ಸೇರಿಸಲಾಗಿದೆ.`
-        : `Added ${qty} of ${skuForCart} to cart.`;
+      const addedMsg = t(lang, 'CART_ADDED_LINE', { sku: skuForCart, qty });
       await sendText(to, addedMsg);
-      const nextBody = lang === 'kn' ? 'ಮುಂದಿನ ಹಂತಗಳು' : 'Next steps';
+      const nextBody = t(lang, 'NEXT_STEPS_TITLE');
       return sendButtons(to, nextBody, [
-        { type: 'reply', reply: { id: `qtyplus_${skuLower}`, title: '+1 set' } },
-        { type: 'reply', reply: { id: 'cart_view', title: lang === 'kn' ? 'View cart' : 'View cart' } },
-        { type: 'reply', reply: { id: 'checkout', title: lang === 'kn' ? 'Checkout' : 'Checkout' } }
+        { type: 'reply', reply: { id: `qtyplus_${skuLower}`, title: t(lang, 'BUTTON_QTYPLUS') } },
+        { type: 'reply', reply: { id: 'cart_view', title: t(lang, 'BUTTON_VIEW_CART') } },
+        { type: 'reply', reply: { id: 'checkout', title: t(lang, 'BUTTON_CHECKOUT') } }
       ]);
     }
     if (lower === 'cart' || lower === 'view') {
@@ -1046,25 +1035,21 @@ async function handleMessage(waUserId, text, rawMsg) {
       const total = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
       const lines = items.map(i => `• ${i.sku} x ${i.qty} = ${i.qty * i.unit_price}`);
       if (!items.length) {
-        const msgEmpty = lang === 'kn' ? 'ನಿಮ್ಮ ಕಾರ್ಟ್ ಖಾಲಿ ಇದೆ.' : 'Your cart is empty.';
+        const msgEmpty = t(lang, 'CART_EMPTY');
         return sendText(to, msgEmpty);
       }
-      const header = lang === 'kn' ? 'ನಿಮ್ಮ ಕಾರ್ಟ್:' : 'Your cart:';
-      const totalLine = lang === 'kn' ? `Total: ${total}` : `Total: ${total}`;
+      const header = t(lang, 'CART_HEADER');
+      const totalLine = t(lang, 'CART_TOTAL_LINE', { total });
       return sendText(to, [header, ...lines, totalLine].join('\n'));
     }
     if (lower === 'checkout') {
       sess.state = 'business';
       await dbSaveSession(waUserId, sess);
-      const msg = lang === 'kn'
-        ? 'ದಯವಿಟ್ಟು ನಿಮ್ಮ ಬಿಸಿನೆಸ್ ಹೆಸರನ್ನು ಕಳುಹಿಸಿ (ಉದಾಹರಣೆ: biz <name>).'
-        : 'Please share your Business Name (reply: biz <name>).';
+      const msg = t(lang, 'BUSINESS_PROMPT');
       return sendText(to, msg);
     }
-    const msg = lang === 'kn'
-      ? "'view <SKU>' ಮೂಲಕ ವಿವರಗಳನ್ನು ನೋಡಿ, 'next'/'prev' ಮೂಲಕ ಪುಟ ಬದಲಾಯಿಸಿ, 'add <SKU> <QTY>' ನಿಂದ ಕಾರ್ಟಿಗೆ ಸೇರಿಸಿ, 'cart' ಮೂಲಕ ಕಾರ್ಟ್ ನೋಡಿ, 'checkout' ಮೂಲಕ ಆರ್ಡರ್ ಮಾಡಿ."
-      : "Type 'view <SKU>' to see details, 'next'/'prev' to page, 'add <SKU> <QTY>' to add items, 'cart' to view, or 'checkout' to place order.";
-    return sendText(to, msg);
+    const msgBrowse = t(lang, 'BROWSE_INLINE_HELP');
+    return sendText(to, msgBrowse);
   }
 
   // Detail state: show hero already sent; support more images and navigation
@@ -1080,9 +1065,7 @@ async function handleMessage(waUserId, text, rawMsg) {
       const skuUpper = skuRaw.toUpperCase();
       const qty = parseInt(parts[2] || '0', 10);
       if (!Number.isInteger(qty) || qty <= 0) {
-        const msg = lang === 'kn'
-          ? 'ದಯವಿಟ್ಟು ಸರಿಯಾದ QTY ಅನ್ನು ನೀಡಿ.'
-          : 'Please provide a valid quantity.';
+        const msg = t(lang, 'INVALID_QTY');
         return sendText(to, msg);
       }
 
@@ -1110,16 +1093,12 @@ async function handleMessage(waUserId, text, rawMsg) {
           currency = (legacy.currency || 'INR').toUpperCase();
           moq = Number.isInteger(legacy.moq) && legacy.moq > 0 ? legacy.moq : 1;
         } else {
-          const msg = lang === 'kn'
-            ? 'Unknown SKU. ಕ್ಯಾಪ್ಶನ್‌ನಲ್ಲಿ ತೋರಿಸಿರುವ SKU ಅನ್ನು ರಿಪ್ಲೈ ಮಾಡಿ.'
-            : 'Unknown SKU. Reply with SKU shown in the caption.';
+          const msg = t(lang, 'UNKNOWN_SKU_CAPTION');
           return sendText(to, msg);
         }
       }
       if (!Number.isFinite(price) || price <= 0) {
-        const msg = lang === 'kn'
-          ? `Price not set for ${skuUpper}. ದಯವಿಟ್ಟು ಕ್ಯಾಟಲಾಗ್ ಬೆಲೆ ಅಪ್ಡೇಟ್ ಮಾಡಿ ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.`
-          : `Price not set for ${skuUpper}. Please update the catalog price and try again.`;
+        const msg = t(lang, 'PRICE_NOT_SET', { sku: skuUpper });
         return sendText(to, msg);
       }
       const cart = await dbGetCart(waUserId);
@@ -1134,15 +1113,13 @@ async function handleMessage(waUserId, text, rawMsg) {
       }
       cart.currency = currency || cart.currency || 'INR';
       await dbSaveCart(waUserId, cart);
-      const addedMsgDetail = lang === 'kn'
-        ? `${skuForCart} ಇಂದ ${qty} ಕಾರ್ಟಿಗೆ ಸೇರಿಸಲಾಗಿದೆ.`
-        : `Added ${qty} of ${skuForCart} to cart.`;
+      const addedMsgDetail = t(lang, 'CART_ADDED_LINE', { sku: skuForCart, qty });
       await sendText(to, addedMsgDetail);
-      const nextBodyDetail = lang === 'kn' ? 'ಮುಂದಿನ ಹಂತಗಳು' : 'Next steps';
+      const nextBodyDetail = t(lang, 'NEXT_STEPS_TITLE');
       return sendButtons(to, nextBodyDetail, [
-        { type: 'reply', reply: { id: `qtyplus_${skuLower}`, title: '+1 set' } },
-        { type: 'reply', reply: { id: 'cart_view', title: 'View cart' } },
-        { type: 'reply', reply: { id: 'checkout', title: 'Checkout' } }
+        { type: 'reply', reply: { id: `qtyplus_${skuLower}`, title: t(lang, 'BUTTON_QTYPLUS') } },
+        { type: 'reply', reply: { id: 'cart_view', title: t(lang, 'BUTTON_VIEW_CART') } },
+        { type: 'reply', reply: { id: 'checkout', title: t(lang, 'BUTTON_CHECKOUT') } }
       ]);
     }
     if (lower === 'browse' || lower === 'catalog') {
@@ -1166,7 +1143,7 @@ async function handleMessage(waUserId, text, rawMsg) {
       const rawSku2 = lower.slice(5).trim();
       const sku2 = rawSku2 ? rawSku2.toLowerCase() : '';
       if (!sku2) {
-        const msg = lang === 'kn' ? "Usage: view <SKU>" : "Usage: view <SKU>";
+        const msg = t(lang, 'USAGE_VIEW_SKU');
         return sendText(to, msg);
       }
       sess.selected_product = sku2;
@@ -1175,10 +1152,8 @@ async function handleMessage(waUserId, text, rawMsg) {
       return showProductDetail(to, sku2, sess);
     }
     // Default help in detail
-    const msg = lang === 'kn'
-      ? "ಹೆಚ್ಚು ಚಿತ್ರಗಳಿಗೆ 'more images', ಹಿಂತಿರುಗಲು 'browse', ಕ್ಯಾಟಗರಿ ಬದಲಾಯಿಸಲು 'types' ಬಳಸಿ."
-      : "Reply 'more images' for more, 'browse' to go back, or 'types' to change category.";
-    return sendText(to, msg);
+    const msgDetail = t(lang, 'DETAIL_INLINE_HELP');
+    return sendText(to, msgDetail);
   }
 
   if (sess.state === 'business') {
@@ -1195,51 +1170,50 @@ async function handleMessage(waUserId, text, rawMsg) {
       await dbSaveSession(waUserId, sess);
       const cart = await dbGetCart(waUserId);
       const total = (cart.items || []).reduce((s, i) => s + i.qty * i.unit_price, 0);
-      const body = lang === 'kn'
-        ? `${name}ಗಾಗಿ order Confirm ಮಾಡಬೇಕೆ? Total ${total}`
-        : `Confirm order for ${name}? Total ${total}`;
-      const yesTitle = lang === 'kn' ? 'Confirm' : 'Confirm';
-      const noTitle = lang === 'kn' ? 'Cancel' : 'Cancel';
+      const body = t(lang, 'CONFIRM_BODY', { name, total });
+      const yesTitle = t(lang, 'BUTTON_CONFIRM');
+      const noTitle = t(lang, 'BUTTON_CANCEL');
       return sendButtons(to, body, [
         { type: 'reply', reply: { id: 'confirm_yes', title: yesTitle } },
         { type: 'reply', reply: { id: 'confirm_no', title: noTitle } }
       ]);
     }
-    const msg = lang === 'kn'
-      ? 'ನಿಮ್ಮ ಬಿಸಿನೆಸ್ ಹೆಸರನ್ನು ರಿಪ್ಲೈ ಮಾಡಿ (ಉದಾಹರಣೆ: biz Mindsfire).'
-      : 'Reply your Business Name (e.g., biz Mindsfire).';
+    const msg = t(lang, 'BUSINESS_PROMPT');
     return sendText(to, msg);
   }
 
   if (sess.state === 'confirm') {
-    if (lower.includes('confirm') || lower.includes('confirm_yes')) {
+    const kw = YES_NO_KEYWORDS[lang] || YES_NO_KEYWORDS.en;
+    const yesWords = kw.yes || YES_NO_KEYWORDS.en.yes;
+    const noWords = kw.no || YES_NO_KEYWORDS.en.no;
+
+    const isYes =
+      lower.includes('confirm_yes') ||
+      yesWords.some(w => lower === w || lower.includes(w));
+    const isNo =
+      lower.includes('confirm_no') ||
+      noWords.some(w => lower === w || lower.includes(w));
+
+    if (isYes) {
       const order = await createOrder(waUserId, sess);
       await dbSaveSession(waUserId, { state: 'start', mode: null, language: (sess && (sess.language || sess.locale)) || 'en' });
       await dbClearCart(waUserId);
-      const msg = lang === 'kn'
-        ? `ಆರ್ಡರ್ place ಆಗಿದೆ! ID: ${order.id}`
-        : `Order placed! ID: ${order.id}`;
+      const msg = t(lang, 'CONFIRM_ORDER_PLACED', { id: order.id });
       await sendText(to, msg);
       return;
     }
-    if (lower.includes('cancel') || lower.includes('confirm_no')) {
+    if (isNo) {
       await dbSaveSession(waUserId, { state: 'start', mode: null, language: (sess && (sess.language || sess.locale)) || 'en' });
-      const msg = lang === 'kn'
-        ? 'ಆರ್ಡರ್ ರದ್ದು ಮಾಡಲಾಗಿದೆ.'
-        : 'Order cancelled.';
+      const msg = t(lang, 'CONFIRM_ORDER_CANCELLED');
       return sendText(to, msg);
     }
-    const msg = lang === 'kn'
-      ? 'ದಯವಿಟ್ಟು Confirm ಅಥವಾ Cancel ಆಯ್ಕೆಮಾಡಿ.'
-      : 'Please Confirm or Cancel.';
+    const msg = t(lang, 'CONFIRM_CHOOSE_ACTION');
     return sendText(to, msg);
   }
 
   // fallback
   {
-    const msg = lang === 'kn'
-      ? 'ಪ್ರಾರಂಭಿಸಲು ಯಾವುದೇ ಸಂದೇಶವನ್ನು ಟೈಪ್ ಮಾಡಿ.'
-      : 'Type any message to start.';
+    const msg = t(lang, 'FALLBACK_START');
     return sendText(to, msg);
   }
 }
@@ -1257,9 +1231,16 @@ async function showCatalog(to) {
     items = await listCatalog(3);
   }
   for (const p of items) {
-    await sendImage(to, p.image_url, `${p.sku} | ${p.title}\nPrice: ${p.price} ${p.currency}\nMOQ: ${p.moq}\nType 'add ${p.sku} <QTY>'`);
+    const caption = t('en', 'CATALOG_IMAGE_CAPTION', {
+      sku: p.sku,
+      title: p.title,
+      price: p.price,
+      currency: p.currency,
+      moq: p.moq
+    });
+    await sendImage(to, p.image_url, caption);
   }
-  await sendText(to, "Reply 'add <SKU> <QTY>' to add items, 'cart' to view, or 'checkout' to place order.");
+  await sendText(to, t('en', 'CATALOG_FOOTER'));
 }
 
 // --- Order creation & Sheet logging ---
