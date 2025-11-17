@@ -65,7 +65,7 @@ export const messages = {
   },
   kn: {
     LANG_GATE_PROMPT: "Choose your language / ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ",
-    ASK_MODE_PROMPT: "ನೀವು Wholesale ಅಥವಾ Retail ಖರೀದಿಗರಾ?",
+    ASK_MODE_PROMPT: "ನೀವು Wholesale ಅಥವಾ Retail ಖರೀದಿದಾರರಾ?",
     ASK_MODE_HELP: "ನೀವು ಬಿಸಿನೆಸ್ / ರೀಸೆಲ್90ಗಾಗಿ ಖರೀದಿಸುತ್ತಿದ್ದರೆ Wholesale ಆಯ್ಕೆಮಾಡಿ. Retail ಅನ್ನು ಬಿಸಿನೆಸ್ ಖರೀದಿಗರಿಗೆ ಮಾತ್ರ ಬಳಸಬಹುದು. 'Wholesale' ಎಂದು ಟೈಪ್ ಮಾಡಬಹುದು ಅಥವಾ ಬಟನ್ ಬಳಸಿ.",
     ASK_MODE_CHOOSE: "ದಯವಿಟ್ಟು Wholesale ಅಥವಾ Retail ಆಯ್ಕೆಮಾಡಿ.",
     B2B_GATE_PROMPT: "ನಾವು ಪ್ರಸ್ತುತ ಹೋಲ್90ಸೇಲ್ ಬಿಸಿನೆಸ್ ಖರೀದಿಗರಿಗೆ ಮಾತ್ರ ಸೇವೆ ನೀಡುತ್ತೇವೆ. ನೀವು ಬಿಸಿನೆಸ್ / ರೀಸೆಲ್90ಗಾಗಿ ಖರೀದಿಸುತ್ತಿದ್ದೀರಾ?",
