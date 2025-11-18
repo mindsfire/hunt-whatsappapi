@@ -137,3 +137,4 @@ export function t(lang, key, vars = {}) {
     Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : match
   ));
 }
+# Add more laungages
