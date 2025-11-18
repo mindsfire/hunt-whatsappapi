@@ -49,6 +49,22 @@ const YES_NO_KEYWORDS = {
   kn: {
     yes: ['ಹೌದು', 'ಸಮ್ಮತಿಸಿ'],
     no: ['ಇಲ್ಲ', 'ರದ್ದು']
+  },
+  ta: {
+    yes: ['ஆம்', 'ஆமாம்'],
+    no: ['இல்லை']
+  },
+  te: {
+    yes: ['అవును'],
+    no: ['కాదు']
+  },
+  hi: {
+    yes: ['हाँ', 'हां'],
+    no: ['नहीं']
+  },
+  ml: {
+    yes: ['അതെ'],
+    no: ['ഇല്ല']
   }
 };
 
@@ -364,24 +380,31 @@ async function sendText(to, body) {
 async function sendButtons(to, text, buttons) {
   return waSend({ messaging_product: 'whatsapp', to, type: 'interactive', interactive: { type: 'button', body: { text }, action: { buttons } } });
 }
-async function sendList(to, bodyText, buttonText, sectionTitle, rows) {
+async function sendList(to, bodyText, buttonText, sectionTitle, rows, headerText, footerText) {
+  const interactive = {
+    type: 'list',
+    body: { text: bodyText },
+    action: {
+      button: buttonText || 'Select',
+      sections: [
+        {
+          title: sectionTitle || 'Options',
+          rows
+        }
+      ]
+    }
+  };
+  if (headerText) {
+    interactive.header = { type: 'text', text: headerText };
+  }
+  if (footerText) {
+    interactive.footer = { text: footerText };
+  }
   return waSend({
     messaging_product: 'whatsapp',
     to,
     type: 'interactive',
-    interactive: {
-      type: 'list',
-      body: { text: bodyText },
-      action: {
-        button: buttonText || 'Select',
-        sections: [
-          {
-            title: sectionTitle || 'Options',
-            rows
-          }
-        ]
-      }
-    }
+    interactive
   });
 }
 async function sendImage(to, imageUrl, caption = '') {
@@ -683,6 +706,22 @@ async function sendHelp(to, sess) {
   return sendText(to, t(lang, 'HELP_FALLBACK'));
 }
 
+async function sendLanguageSelector(to) {
+  const headerText = t('en', 'LANG_GATE_HEADER');
+  const bodyText = t('en', 'LANG_GATE_BODY');
+  const footerText = t('en', 'LANG_GATE_FOOTER');
+  const buttonText = t('en', 'BUTTON_LANG_SELECT');
+  const rows = [
+    { id: 'lang_en', title: 'English', description: '' },
+    { id: 'lang_kn', title: 'ಕನ್ನಡ', description: '' },
+    { id: 'lang_ta', title: 'தமிழ்', description: '' },
+    { id: 'lang_te', title: 'తెలుగు', description: '' },
+    { id: 'lang_hi', title: 'हिन्दी', description: '' },
+    { id: 'lang_ml', title: 'മലയാളം', description: '' }
+  ];
+  return sendList(to, bodyText, buttonText, 'Languages', rows, headerText, footerText);
+}
+
 // --- Simple state machine ---
 async function handleMessage(waUserId, text, rawMsg) {
   const to = waUserId;
@@ -735,6 +774,18 @@ async function handleMessage(waUserId, text, rawMsg) {
           lower = 'lang en';
         } else if (idLower === 'lang_kn') {
           lower = 'lang kn';
+        } else if (idLower === 'lang_more') {
+          lower = 'lang more';
+        } else if (idLower === 'lang_ta') {
+          lower = 'lang ta';
+        } else if (idLower === 'lang_te') {
+          lower = 'lang te';
+        } else if (idLower === 'lang_hi') {
+          lower = 'lang hi';
+        } else if (idLower === 'lang_ml') {
+          lower = 'lang ml';
+        } else if (idLower === 'start') {
+          lower = 'start';
         }
       } else if (title) {
         const tLower = title.toLowerCase().trim();
@@ -752,6 +803,19 @@ async function handleMessage(waUserId, text, rawMsg) {
 
   if (lower === 'help' || lower === 'type_help') {
     return sendHelp(to, sess);
+  }
+
+  if (lower === 'start') {
+    // Reset conversational state and show language gate again
+    sess.state = 'lang_select';
+    delete sess.language;
+    delete sess.mode;
+    delete sess.type;
+    delete sess.page;
+    delete sess.selected_product;
+    delete sess.images_offset;
+    await dbSaveSession(waUserId, sess);
+    return sendLanguageSelector(to);
   }
 
   // Global cart view / checkout shortcuts (work from any state)
@@ -804,10 +868,7 @@ async function handleMessage(waUserId, text, rawMsg) {
     if (!sess.language) {
       sess.state = 'lang_select';
       await dbSaveSession(waUserId, sess);
-      return sendButtons(to, t('en', 'LANG_GATE_PROMPT'), [
-        { type: 'reply', reply: { id: 'lang_en', title: 'English' } },
-        { type: 'reply', reply: { id: 'lang_kn', title: 'ಕನ್ನಡ' } }
-      ]);
+      return sendLanguageSelector(to);
     }
     sess.state = 'ask_mode';
     await dbSaveSession(waUserId, sess);
@@ -823,6 +884,7 @@ async function handleMessage(waUserId, text, rawMsg) {
   // Language selection state
   if (sess.state === 'lang_select') {
     if (lower === 'lang en' || lower === 'english') {
+      // Proceed in English directly
       sess.language = 'en';
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
@@ -833,18 +895,28 @@ async function handleMessage(waUserId, text, rawMsg) {
     }
     if (lower === 'lang kn' || lower === 'kannada' || lower === 'ಕನ್ನಡ') {
       sess.language = 'kn';
+    } else if (lower === 'lang ta') {
+      sess.language = 'ta';
+    } else if (lower === 'lang te') {
+      sess.language = 'te';
+    } else if (lower === 'lang hi') {
+      sess.language = 'hi';
+    } else if (lower === 'lang ml') {
+      sess.language = 'ml';
+    }
+
+    if (sess.language) {
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
-      return sendButtons(to, t('kn', 'ASK_MODE_PROMPT'), [
-        { type: 'reply', reply: { id: 'mode_wholesale', title: t('kn', 'BUTTON_MODE_WHOLESALE') } },
-        { type: 'reply', reply: { id: 'mode_retail', title: t('kn', 'BUTTON_MODE_RETAIL') } }
+      const l = sess.language;
+      return sendButtons(to, t(l, 'ASK_MODE_PROMPT'), [
+        { type: 'reply', reply: { id: 'mode_wholesale', title: t(l, 'BUTTON_MODE_WHOLESALE') } },
+        { type: 'reply', reply: { id: 'mode_retail', title: t(l, 'BUTTON_MODE_RETAIL') } }
       ]);
     }
+
     // Re-show language selector on any other input
-    return sendButtons(to, t('en', 'LANG_GATE_PROMPT'), [
-      { type: 'reply', reply: { id: 'lang_en', title: t('en', 'BUTTON_LANG_EN') } },
-      { type: 'reply', reply: { id: 'lang_kn', title: t('en', 'BUTTON_LANG_KN') } }
-    ]);
+    return sendLanguageSelector(to);
   }
 
   if (sess.state === 'ask_mode') {
@@ -892,7 +964,11 @@ async function handleMessage(waUserId, text, rawMsg) {
     if (isNo) {
       sess.state = 'start';
       await dbSaveSession(waUserId, sess);
-      return sendText(to, t(lang, 'B2B_GATE_THANKS_NO'));
+      const body = t(lang, 'B2B_GATE_THANKS_NO');
+      const startTitle = t(lang, 'BUTTON_START');
+      return sendButtons(to, body, [
+        { type: 'reply', reply: { id: 'start', title: startTitle } }
+      ]);
     }
     const body = t(lang, 'B2B_GATE_QUESTION');
     const noTitle = t(lang, 'BUTTON_B2B_NO');
