@@ -293,48 +293,6 @@ app.get('/admin/sync-catalog-from-sheets', async (req, res) => {
   }
 });
 
-app.get('/api/products', async (req, res) => {
-  try {
-    const u = (req.query.u || '').toString().trim();
-    const tkn = (req.query.t || '').toString().trim();
-    const type = (req.query.type || 'indian').toString().toLowerCase();
-    const page = Math.max(1, parseInt((req.query.page || '1').toString(), 10) || 1);
-    const pageSize = Math.max(1, Math.min(50, parseInt((req.query.pageSize || '20').toString(), 10) || 20));
-    if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-    if (!verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
-
-    // Load list for the type
-    const list = await getProductsByType(type).catch(() => []);
-    const total = Array.isArray(list) ? list.length : 0;
-    const pageCount = Math.max(1, Math.ceil(total / pageSize));
-    const p = Math.min(Math.max(1, page), pageCount);
-    const start = (p - 1) * pageSize;
-    const end = Math.min(total, start + pageSize);
-    const slice = list.slice(start, end);
-
-    // Hydrate details from products collection
-    const items = [];
-    for (const it of slice) {
-      const sku = (it.sku || '').toString().toLowerCase();
-      if (!sku) continue;
-      const pd = await getProductDoc(sku).catch(() => null);
-      if (!pd) continue;
-      const images = Array.isArray(pd.images) ? pd.images : [];
-      const heroIdx = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
-      const image_url = images[heroIdx] || '';
-      const price = Number(pd.price || 0) || 0;
-      const currency = (pd.currency || 'INR').toString();
-      const title = pd.title || (it.title || sku.toUpperCase());
-      items.push({ content_id: sku, title, price, currency, image_url });
-    }
-
-    return res.status(200).json({ ok: true, type, page: p, pageSize, total, pageCount, items });
-  } catch (e) {
-    console.error('GET /api/products error', e);
-    return res.status(200).json({ ok: false, error: String(e) });
-  }
-});
-
 // --- Admin: Export products as CSV for pricing seeding ---
 app.get('/admin/export-products-csv', async (req, res) => {
   try {
@@ -1476,32 +1434,9 @@ async function handleMessage(waUserId, text, rawMsg) {
   }
 
   if (sess.state === 'confirm') {
-    const kw = YES_NO_KEYWORDS[lang] || YES_NO_KEYWORDS.en;
-    const yesWords = kw.yes || YES_NO_KEYWORDS.en.yes;
-    const noWords = kw.no || YES_NO_KEYWORDS.en.no;
-
-    const isYes =
-      lower.includes('confirm_yes') ||
-      yesWords.some(w => lower === w || lower.includes(w));
-    const isNo =
-      lower.includes('confirm_no') ||
-      noWords.some(w => lower === w || lower.includes(w));
-
-    if (isYes) {
-      const order = await createOrder(waUserId, sess);
-      await dbSaveSession(waUserId, { state: 'start', mode: null, language: (sess && (sess.language || sess.locale)) || 'en' });
-      await dbClearCart(waUserId);
-      const msg = t(lang, 'CONFIRM_ORDER_PLACED', { id: order.id });
-      await sendText(to, msg);
-      return;
-    }
-    if (isNo) {
-      await dbSaveSession(waUserId, { state: 'start', mode: null, language: (sess && (sess.language || sess.locale)) || 'en' });
-      const msg = t(lang, 'CONFIRM_ORDER_CANCELLED');
-      return sendText(to, msg);
-    }
-    const msg = t(lang, 'CONFIRM_CHOOSE_ACTION');
-    return sendText(to, msg);
+    // Legacy chat-based confirmation is deprecated; orders are placed via web checkout only.
+    const info = 'To place or confirm your order, please use the latest checkout link we sent above.';
+    return sendText(to, info);
   }
 
   // Handle native WhatsApp order message
@@ -1555,43 +1490,16 @@ async function handleNativeOrder(waUserId, rawMsg) {
     currency = cur; // assume all same currency
   }
 
-  const id = 'ORD-' + Math.random().toString(36).slice(2, 10).toUpperCase();
-
-  // We might not have business info if they just sent an order directly.
-  // But usually we ask for it before they can even see the catalog if we enforce it.
-  // If missing, we can just store what we have.
-  const sess = await dbGetSession(waUserId);
-  const business = sess.business || { name: sess.business_name || '', address: sess.business_address || '' };
-
-  const order = {
-    id,
-    wa_user_id: waUserId,
-    business,
-    items,
-    currency,
-    subtotal,
-    created_at: nowIso(),
-    source: 'whatsapp_native'
-  };
-
-  // Persist
-  try { await createOrderDoc(order); } catch (e) { console.error('createOrderDoc error', e); }
-  try { await appendOrderToSheet(order); } catch (e) { console.error('appendOrderToSheet error', e); }
-
-  await sendText(waUserId, `Thank you! Your order (${id}) has been placed successfully.`);
+  // Legacy chat-native order creation is deprecated; web checkout is now the only order mechanism.
+  const info = 'Ordering directly by message is no longer supported. Please use the checkout link we sent to review items and place your order.';
+  await sendText(waUserId, info);
 }
 
 async function showCatalog(to) {
-  let items = await listCatalog(3);
+  const items = await listCatalog(3);
   if (!items || items.length === 0) {
-    // seed demo items into Firestore once
-    const seed = [
-      { sku: 'TSHIRT-1001', title: 'Classic Cotton Tee', price: 249, currency: 'INR', moq: 10, image_url: 'https://picsum.photos/seed/t1/512/512', active: true, updated_at: nowIso() },
-      { sku: 'KURTI-2001', title: 'Elegant Kurti', price: 699, currency: 'INR', moq: 5, image_url: 'https://picsum.photos/seed/k1/512/512', active: true, updated_at: nowIso() },
-      { sku: 'JACKET-3001', title: 'Imported Jacket', price: 2499, currency: 'INR', moq: 2, image_url: 'https://picsum.photos/seed/j1/512/512', active: true, updated_at: nowIso() }
-    ];
-    await upsertCatalogItems(seed);
-    items = await listCatalog(3);
+    await sendText(to, t('en', 'CATALOG_FOOTER'));
+    return;
   }
   for (const p of items) {
     const caption = t('en', 'CATALOG_IMAGE_CAPTION', {
@@ -1606,38 +1514,7 @@ async function showCatalog(to) {
   await sendText(to, t('en', 'CATALOG_FOOTER'));
 }
 
-// --- Order creation & Sheet logging ---
-async function createOrder(waUserId, sess) {
-  const id = 'ORD-' + Math.random().toString(36).slice(2, 10).toUpperCase();
-  const order = {
-    id,
-    wa_user_id: waUserId,
-    business: sess.business || {},
-    // Pull items from persisted cart to ensure consistency
-    items: (await dbGetCart(waUserId)).items || [],
-    currency: ((await dbGetCart(waUserId)).items?.[0] && (await dbGetCart(waUserId)).items[0].currency) || 'INR',
-    subtotal: ((await dbGetCart(waUserId)).items || []).reduce((s, i) => s + i.qty * i.unit_price, 0),
-    created_at: nowIso()
-  };
-  // Persist to Firestore
-  try { await createOrderDoc(order); } catch (e) { console.error('createOrderDoc error', e); }
-  // Attempt to append to Google Sheet if configured
-  try { await appendOrderToSheet(order); } catch (e) { console.error('appendOrderToSheet error', e); }
-  return order;
-}
-
-async function appendOrderToSheet(order) {
-  if (!SALES_SHEET_ID) return;
-  const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
-  const sheets = google.sheets({ version: 'v4', auth });
-  const row = [order.created_at, order.id, order.wa_user_id, order.business.name || '', JSON.stringify(order.items), order.subtotal, order.currency, 'placed'];
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SALES_SHEET_ID,
-    range: 'Orders!A1',
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [row] }
-  });
-}
+// (Order creation & Sheet logging now live in routes/api.js for web checkout.)
 
 // --- Catalog sync endpoint ---
 app.post('/sync-catalog', async (req, res) => {

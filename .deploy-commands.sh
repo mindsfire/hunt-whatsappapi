@@ -23,3 +23,13 @@ gcloud run deploy hunt-whatsappapi \
   --region asia-south1 \
   --allow-unauthenticated \
   --env-vars-file=.env
+
+gcloud alpha run services logs tail hunt-whatsappapi \
+  --region asia-south1 \
+  --project prod-hunt-whatsappapi
+
+# sync from cm
+export SYNC_SHARED_SECRET=<changeme>
+curl -X GET \
+  "https://hunt-whatsappapi-876367554060.asia-south1.run.app/admin/sync-from-cm" \
+  -H "X-Shared-Secret: $SYNC_SHARED_SECRET"
