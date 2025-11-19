@@ -160,7 +160,14 @@ export default function Page() {
 
   return (
     <div>
-      <h1 style={{ margin: "8px 0 16px" }}>Checkout</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0 16px", gap: 12 }}>
+        <img
+          src="/checkout/hunt-logo.jpg"
+          alt="Hunt Wholesale"
+          style={{ height: 56, maxWidth: 240, objectFit: "contain" }}
+        />
+        <h1 style={{ margin: 0 }}>Checkout</h1>
+      </div>
       {!waId || !token ? (
         <div>Missing link parameters.</div>
       ) : loading ? (
@@ -259,8 +266,8 @@ export default function Page() {
 
           <div style={{ marginTop: 16, borderTop: "1px solid #333", paddingTop: 12 }}>
             <div style={{ marginBottom: 8, fontWeight: 600 }}>Business</div>
-            <input placeholder="Business name" value={bizName} onChange={(e) => setBizName(e.target.value)} style={{ width: "100%", padding: 10, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, marginBottom: 8 }} />
-            <textarea placeholder="Full address" value={bizAddr} onChange={(e) => setBizAddr(e.target.value)} rows={4} style={{ width: "100%", padding: 10, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }} />
+            <input placeholder="Business name" value={bizName} onChange={(e) => setBizName(e.target.value)} style={{ width: "100%", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, marginBottom: 8 }} />
+            <textarea placeholder="Full address" value={bizAddr} onChange={(e) => setBizAddr(e.target.value)} rows={4} style={{ width: "100%", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }} />
           </div>
 
           <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>

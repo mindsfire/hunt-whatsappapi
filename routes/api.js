@@ -6,6 +6,8 @@ import { sendText } from '../lib/wa.js';
 
 function nowIso() { return new Date().toISOString(); }
 
+const DISABLE_CHECKOUT_TOKEN = ((process.env.DISABLE_CHECKOUT_TOKEN || 'false').toString().toLowerCase() === 'true');
+
 async function getProductDoc(adminDb, sku) {
   const doc = await adminDb.collection('products').doc((sku || '').toLowerCase()).get();
   return doc.exists ? doc.data() : null;
@@ -40,7 +42,7 @@ export function registerApiRoutes(app, adminDb) {
       const u = (req.query.u || '').toString().trim();
       const tkn = (req.query.t || '').toString().trim();
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
 
       let business = { name: '', address: '' };
       try {
@@ -83,7 +85,7 @@ export function registerApiRoutes(app, adminDb) {
       const u = (req.body?.u || '').toString().trim();
       const tkn = (req.body?.t || '').toString().trim();
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
 
       const itemsIn = Array.isArray(req.body?.items) ? req.body.items : [];
       if (!itemsIn.length) return res.status(400).json({ ok: false, error: 'items required' });
