@@ -8,6 +8,12 @@ import { google } from 'googleapis';
 import { Storage } from '@google-cloud/storage';
 import { Firestore } from '@google-cloud/firestore';
 import { t } from './locales.js';
+import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId } from './lib/wa.js';
+import { makeCheckoutToken, verifyCheckoutToken, buildCheckoutUrl } from './lib/checkout.js';
+import { graphGet, fetchSets, fetchSetItems, fetchSetProductsDetailed, parsePriceToNumber } from './lib/graph.js';
+import { getOrCreateMediaIdForGcsPath } from './lib/media.js';
+import { registerAdminRoutes } from './routes/admin.js';
+import { registerApiRoutes } from './routes/api.js';
 import {
   initDb,
   getSession as dbGetSession,
@@ -57,24 +63,7 @@ const BASE_URL = process.env.BASE_URL || '';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function makeCheckoutToken(waId) {
-  if (!CHECKOUT_TOKEN_SECRET) return 'dev';
-  return crypto.createHmac('sha256', CHECKOUT_TOKEN_SECRET).update(String(waId)).digest('hex');
-}
-function verifyCheckoutToken(waId, token) {
-  if (!CHECKOUT_TOKEN_SECRET) return true;
-  try {
-    const expected = makeCheckoutToken(waId);
-    return token === expected;
-  } catch (_) { return false; }
-}
-
-function buildCheckoutUrl(waId) {
-  const base = (BASE_URL || '').replace(/\/$/, '');
-  const token = makeCheckoutToken(waId);
-  if (!base) return `/checkout/?u=${encodeURIComponent(waId)}&t=${token}`;
-  return `${base}/checkout/?u=${encodeURIComponent(waId)}&t=${token}`;
-}
+// helpers imported from ./lib/checkout.js
 
 // Locale-specific yes/no keywords for intent recognition
 // This keeps business logic independent of specific UI text and makes it easy to add locales.
@@ -220,63 +209,7 @@ async function sendSingleProduct(to, bodyText, retailerId) {
   }
 }
 
-async function graphGet(url) {
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${WA_GRAPH_TOKEN}` } });
-  const text = await res.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch (_) { }
-  if (!res.ok) {
-    console.error('Graph GET error', res.status, json || text);
-    throw new Error(`Graph GET ${res.status}`);
-  }
-  return json || {};
-}
-
-async function fetchSets() {
-  if (!WA_CATALOG_ID) return [];
-  const u = `https://graph.facebook.com/v20.0/${WA_CATALOG_ID}/product_sets?fields=id,name&limit=200`;
-  const j = await graphGet(u).catch(() => ({ data: [] }));
-  return Array.isArray(j.data) ? j.data : [];
-}
-
-async function fetchSetItems(setId) {
-  if (!setId) return [];
-  const u = `https://graph.facebook.com/v20.0/${setId}/products?fields=retailer_id&limit=30`;
-  const j = await graphGet(u).catch(() => ({ data: [] }));
-  const arr = Array.isArray(j.data) ? j.data : [];
-  return arr.map(x => x && x.retailer_id).filter(Boolean);
-}
-
-function parsePriceToNumber(priceStr) {
-  if (priceStr === undefined || priceStr === null) return 0;
-  if (typeof priceStr === 'number') return priceStr;
-  const s = String(priceStr).replace(/[^0-9.]/g, '');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-async function fetchSetProductsDetailed(setId) {
-  if (!setId) return [];
-  let url = `https://graph.facebook.com/v20.0/${setId}/products?fields=id,retailer_id,name,price,currency,image_url,additional_image_urls&limit=100`;
-  const out = [];
-  for (let i = 0; i < 30 && url; i++) {
-    const j = await graphGet(url).catch(() => ({}));
-    const data = Array.isArray(j.data) ? j.data : [];
-    for (const p of data) {
-      out.push({
-        id: p.id,
-        retailer_id: p.retailer_id,
-        name: p.name,
-        price: parsePriceToNumber(p.price),
-        currency: p.currency || 'INR',
-        image_url: p.image_url || '',
-        additional_image_urls: Array.isArray(p.additional_image_urls) ? p.additional_image_urls : []
-      });
-    }
-    url = (j.paging && j.paging.next) ? j.paging.next : '';
-  }
-  return out;
-}
+// graph helpers imported from ./lib/graph.js
 
 async function showWAProductListForType(to, typeKey) {
   let retailerIds = [];
@@ -312,6 +245,10 @@ async function showWAProductListForType(to, typeKey) {
 // --- Firestore init ---
 initDb();
 const adminDb = new Firestore({ projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT });
+// mount admin module routes
+registerAdminRoutes(app, adminDb);
+// mount api module routes
+registerApiRoutes(app, adminDb);
 
 // --- Admin: Sync catalog from Google Sheets ---
 // Usage: GET /admin/sync-catalog-from-sheets?sheetId=...&range=Catalog!A1:Z&mode=dry-run|commit
@@ -438,82 +375,6 @@ app.get('/admin/export-products-csv', async (req, res) => {
   }
 });
 
-// --- Admin: Sync products from Commerce Manager (Catalog) into Firestore ---
-// Usage: GET /admin/sync-from-cm
-// Auth: header X-Shared-Secret must equal SYNC_SHARED_SECRET if set
-app.get('/admin/sync-from-cm', async (req, res) => {
-  try {
-    if (SYNC_SHARED_SECRET) {
-      const token = req.get('X-Shared-Secret') || '';
-      if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
-    }
-    if (!WA_GRAPH_TOKEN || !WA_CATALOG_ID) {
-      return res.status(400).json({ ok: false, error: 'WA_GRAPH_TOKEN and WA_CATALOG_ID required' });
-    }
-
-    async function resolveSetIdByName(name) {
-      const sets = await fetchSets();
-      const found = sets.find(s => (s.name || '').toLowerCase() === String(name || '').toLowerCase());
-      return (found && found.id) || '';
-    }
-
-    let importedSetId = WA_SET_IMPORTED_ID;
-    if (!importedSetId && WA_SET_IMPORTED_NAME) importedSetId = await resolveSetIdByName(WA_SET_IMPORTED_NAME);
-    let indianSetId = WA_SET_INDIAN_ID;
-    if (!indianSetId && WA_SET_INDIAN_NAME) indianSetId = await resolveSetIdByName(WA_SET_INDIAN_NAME);
-
-    const [imported, indian] = await Promise.all([
-      importedSetId ? fetchSetProductsDetailed(importedSetId) : Promise.resolve([]),
-      indianSetId ? fetchSetProductsDetailed(indianSetId) : Promise.resolve([])
-    ]);
-
-    const types = [];
-    const productsByType = {};
-    const batch = adminDb.batch();
-
-    async function upsertType(typeKey, arr) {
-      if (!arr || !arr.length) return;
-      types.push(typeKey);
-      const itemsMini = [];
-      for (const p of arr) {
-        const sku = String(p.retailer_id || '').toLowerCase();
-        if (!sku) continue;
-        const images = [p.image_url, ...(Array.isArray(p.additional_image_urls) ? p.additional_image_urls : [])].filter(Boolean);
-        const heroIdx = 0;
-        const prodDoc = {
-          sku,
-          type: typeKey,
-          title: p.name || sku.toUpperCase(),
-          price: Number(p.price || 0) || 0,
-          currency: (p.currency || 'INR').toUpperCase(),
-          images,
-          hero_image_index: heroIdx,
-          active: true,
-          updated_at: nowIso()
-        };
-        const ref = adminDb.collection('products').doc(sku);
-        batch.set(ref, prodDoc, { merge: true });
-        itemsMini.push({ sku, title: prodDoc.title, hero_url: images[heroIdx] || '', image_count: images.length });
-      }
-      productsByType[typeKey] = itemsMini;
-      const refType = adminDb.collection('products_by_type').doc(typeKey);
-      batch.set(refType, { type: typeKey, items: itemsMini, updated_at: nowIso() }, { merge: true });
-    }
-
-    await upsertType('imported', imported);
-    await upsertType('indian', indian);
-
-    const cfgRef = adminDb.collection('config').doc('types');
-    if (types.length) batch.set(cfgRef, { types, updated_at: nowIso() }, { merge: true });
-
-    await batch.commit();
-
-    return res.status(200).json({ ok: true, counts: { imported: (imported || []).length, indian: (indian || []).length } });
-  } catch (e) {
-    console.error('sync-from-cm error', e);
-    return res.status(200).json({ ok: false, error: String(e) });
-  }
-});
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -719,60 +580,7 @@ async function sendMoreImages(to, sess) {
   }
 }
 
-// --- WhatsApp helpers ---
-function waApiUrl() { return `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`; }
-async function waSend(payload) {
-  const res = await fetch(waApiUrl(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${WA_TOKEN}`
-    },
-    body: JSON.stringify(payload)
-  });
-  const text = await res.text();
-  if (!res.ok) console.error('WA send error', res.status, text);
-  return { status: res.status, text };
-}
-async function sendText(to, body) {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
-}
-async function sendButtons(to, text, buttons) {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'interactive', interactive: { type: 'button', body: { text }, action: { buttons } } });
-}
-async function sendList(to, bodyText, buttonText, sectionTitle, rows, headerText, footerText) {
-  const interactive = {
-    type: 'list',
-    body: { text: bodyText },
-    action: {
-      button: buttonText || 'Select',
-      sections: [
-        {
-          title: sectionTitle || 'Options',
-          rows
-        }
-      ]
-    }
-  };
-  if (headerText) {
-    interactive.header = { type: 'text', text: headerText };
-  }
-  if (footerText) {
-    interactive.footer = { text: footerText };
-  }
-  return waSend({
-    messaging_product: 'whatsapp',
-    to,
-    type: 'interactive',
-    interactive
-  });
-}
-async function sendImage(to, imageUrl, caption = '') {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'image', image: { link: imageUrl, caption } });
-}
-async function sendImageByMediaId(to, mediaId, caption = '') {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'image', image: { id: mediaId, caption } });
-}
+// WhatsApp helpers imported from ./lib/wa.js
 
 // Share web checkout deep link in chat
 async function sendCheckoutLink(toWaId) {
@@ -784,78 +592,6 @@ async function sendCheckoutLink(toWaId) {
 
 // --- GCS + WhatsApp media upload helpers ---
 const storage = new Storage();
-function normalizeGcsPath(p) {
-  if (!p) return { bucket: '', name: '' };
-  if (p.startsWith('gs://')) {
-    const rest = p.slice('gs://'.length);
-    const firstSlash = rest.indexOf('/');
-    const b = firstSlash === -1 ? rest : rest.slice(0, firstSlash);
-    const name = firstSlash === -1 ? '' : rest.slice(firstSlash + 1);
-    return { bucket: b, name };
-  }
-  // treat as object name under configured bucket/prefix
-  const base = MEDIA_BASE_PREFIX ? `${MEDIA_BASE_PREFIX}/` : '';
-  return { bucket: MEDIA_BUCKET, name: `${base}${p}` };
-}
-
-async function getGcsBytes(gcsPathOrObjectName) {
-  const { bucket, name } = normalizeGcsPath(gcsPathOrObjectName);
-  if (!bucket || !name) throw new Error('Invalid GCS path/object name');
-  const file = storage.bucket(bucket).file(name);
-  const [buf] = await file.download();
-  // try infer mime from extension
-  const lower = name.toLowerCase();
-  const mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-  const filename = name.split('/').pop() || 'image.jpg';
-  return { buf, mime, filename };
-}
-
-function waMediaUploadUrl() {
-  if (!PHONE_NUMBER_ID) throw new Error('WA_PHONE_NUMBER_ID not set');
-  // Cloud API: upload media to the sender phone number's media edge
-  return `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/media`;
-}
-
-async function uploadMediaToWA({ buf, mime, filename }) {
-  // Node 18+: global FormData and Blob are available
-  const form = new FormData();
-  form.append('messaging_product', 'whatsapp');
-  form.append('file', new Blob([buf], { type: mime }), filename);
-  const res = await fetch(waMediaUploadUrl(), {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${WA_TOKEN}` },
-    body: form
-  });
-  let bodyText = '';
-  let json = null;
-  try {
-    bodyText = await res.text();
-    json = JSON.parse(bodyText);
-  } catch (_) {
-    // leave json as null and keep raw text
-  }
-  if (!res.ok) {
-    const errPayload = json || { error_text: bodyText };
-    console.error('WA media upload error', res.status, errPayload);
-    throw new Error(`WA media upload failed: ${res.status} ${JSON.stringify(errPayload)}`);
-  }
-  const mediaId = json && json.id ? json.id : null;
-  if (!mediaId) throw new Error(`WA media upload returned no id: ${bodyText}`);
-  return mediaId; // media_id
-}
-
-// Cache utilities in Firestore
-import { getMediaCache, setMediaCache } from './firestore.js';
-
-async function getOrCreateMediaIdForGcsPath(gcsPathOrObjectName) {
-  const key = gcsPathOrObjectName.startsWith('gs://') ? gcsPathOrObjectName : `${MEDIA_BUCKET}/${MEDIA_BASE_PREFIX ? MEDIA_BASE_PREFIX + '/' : ''}${gcsPathOrObjectName}`;
-  const cached = await getMediaCache(key);
-  if (cached && cached.media_id) return cached.media_id;
-  const payload = await getGcsBytes(gcsPathOrObjectName);
-  const media_id = await uploadMediaToWA(payload);
-  await setMediaCache(key, { media_id, mime: payload.mime, filename: payload.filename, uploaded_at: nowIso() });
-  return media_id;
-}
 
 // --- Admin: public test to send one image by GCS path via media_id cache ---
 app.post('/admin/test-media', async (req, res) => {
@@ -1010,97 +746,7 @@ app.get('/webhook/whatsapp', (req, res) => {
   return res.sendStatus(403);
 });
 
-// --- Web checkout APIs ---
-app.get('/api/cart', async (req, res) => {
-  try {
-    const u = (req.query.u || '').toString().trim();
-    const tkn = (req.query.t || '').toString().trim();
-    if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-    if (!verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
-
-    // Session business info (optional)
-    let business = { name: '', address: '' };
-    try {
-      const sess = await dbGetSession(u);
-      business = {
-        name: sess?.business_name || sess?.business?.name || '',
-        address: sess?.business_address || sess?.business?.address || ''
-      };
-    } catch (_) { }
-
-    // Build items from cart if present
-    const items = [];
-    try {
-      const cart = await dbGetCart(u);
-      const cartItems = Array.isArray(cart?.items) ? cart.items : [];
-      for (const ci of cartItems) {
-        const sku = (ci.sku || ci.content_id || '').toString().toLowerCase();
-        if (!sku) continue;
-        const pd = await getProductDoc(sku);
-        if (!pd) continue;
-        const images = Array.isArray(pd.images) ? pd.images : [];
-        const heroIdx = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
-        const image_url = images[heroIdx] || '';
-        const price = Number(pd.price || ci.unit_price || 0) || 0;
-        const currency = (pd.currency || 'INR').toString();
-        const title = pd.title || sku.toUpperCase();
-        items.push({ content_id: sku, title, price, currency, image_url, qty: Number(ci.qty || 1) });
-      }
-    } catch (_) { }
-
-    return res.status(200).json({ ok: true, items, business });
-  } catch (e) {
-    console.error('GET /api/cart error', e);
-    return res.status(200).json({ ok: false, error: String(e) });
-  }
-});
-
-app.post('/api/order', async (req, res) => {
-  try {
-    const u = (req.body?.u || '').toString().trim();
-    const tkn = (req.body?.t || '').toString().trim();
-    if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-    if (!verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
-
-    const itemsIn = Array.isArray(req.body?.items) ? req.body.items : [];
-    if (!itemsIn.length) return res.status(400).json({ ok: false, error: 'items required' });
-
-    const outItems = [];
-    let subtotal = 0;
-    let currency = 'INR';
-    for (const it of itemsIn) {
-      const cid = (it.content_id || it.sku || '').toString().toLowerCase();
-      const qty = Math.max(1, parseInt(it.qty || '1', 10));
-      if (!cid || !qty) continue;
-      const pd = await getProductDoc(cid);
-      if (!pd) continue;
-      const unit_price = Number(pd.price || 0) || 0;
-      currency = (pd.currency || 'INR').toString();
-      outItems.push({ sku: cid.toUpperCase(), qty, unit_price, currency, size: it.size || '' });
-      subtotal += unit_price * qty;
-    }
-
-    if (!outItems.length) return res.status(400).json({ ok: false, error: 'no valid items' });
-
-    const business = {
-      name: (req.body?.business?.name || '').toString(),
-      address: (req.body?.business?.address || '').toString()
-    };
-
-    const id = 'ORD-' + Math.random().toString(36).slice(2, 10).toUpperCase();
-    const order = { id, wa_user_id: u, business, items: outItems, currency, subtotal, created_at: nowIso(), source: 'web_checkout' };
-
-    try { await createOrderDoc(order); } catch (e) { console.error('createOrderDoc error', e); }
-    try { await appendOrderToSheet(order); } catch (e) { console.error('appendOrderToSheet error', e); }
-
-    return res.status(200).json({ ok: true, id });
-  } catch (e) {
-    console.error('POST /api/order error', e);
-    return res.status(200).json({ ok: false, error: String(e) });
-  }
-});
-
-// --- WhatsApp webhook receiver ---
+// --- Webhook receiver ---
 app.post('/webhook/whatsapp', async (req, res) => {
   try {
     if (!verifySignature(req)) return res.sendStatus(401);
@@ -1433,38 +1079,11 @@ async function handleMessage(waUserId, text, rawMsg) {
   if (sess.state === 'ask_mode') {
     if (lower.includes('wholesale') || lower.includes('mode_wholesale')) {
       sess.mode = 'wholesale';
-      // Share deep link to web checkout immediately
+      // Share deep link to web checkout and stop legacy browse flow
       try { await sendCheckoutLink(waUserId); } catch (_) {}
-      // If WA catalog enabled and flag set, send catalog entry immediately
-      if (USE_WA_CATALOG && WA_CATALOG_ID && SHOW_CATALOG_IMMEDIATELY) {
-        sess.state = 'browse';
-        await dbSaveSession(waUserId, sess);
-        const importedIds = WA_IMPORTED_RETAILER_IDS;
-        const indianIds = WA_INDIAN_RETAILER_IDS;
-        if (importedIds.length || indianIds.length) {
-          return sendProductListSections(to, {
-            ...(importedIds.length ? { Imported: importedIds } : {}),
-            ...(indianIds.length ? { Indian: indianIds } : {})
-          });
-        }
-        const entryId = await chooseCatalogEntryRetailerId();
-        return sendSingleProduct(to, 'Browse our catalog', entryId);
-      }
-      // Collect business info before types if missing
-      if (!sess.business_name) {
-        sess.state = 'business_name';
-        await dbSaveSession(waUserId, sess);
-        return sendText(to, 'Please share your business name.');
-      }
-      if (!sess.business_address) {
-        sess.state = 'business_address';
-        await dbSaveSession(waUserId, sess);
-        return sendText(to, 'Please enter your full business address (including city and pincode).');
-      }
-      // proceed to types
-      sess.state = 'types';
+      sess.state = 'web_checkout';
       await dbSaveSession(waUserId, sess);
-      return showTypes(to, sess);
+      return;
     }
     if (lower.includes('retail') || lower.includes('mode_retail')) {
       // B2B gate: we serve wholesale only. Confirm buyer is B2B.
@@ -1497,35 +1116,11 @@ async function handleMessage(waUserId, text, rawMsg) {
 
     if (isYes) {
       sess.mode = 'wholesale';
-      // Share deep link to web checkout when B2B is confirmed
+      // Share deep link to web checkout when B2B is confirmed and stop legacy browse flow
       try { await sendCheckoutLink(waUserId); } catch (_) {}
-      if (USE_WA_CATALOG && WA_CATALOG_ID && SHOW_CATALOG_IMMEDIATELY) {
-        sess.state = 'browse';
-        await dbSaveSession(waUserId, sess);
-        const importedIds = WA_IMPORTED_RETAILER_IDS;
-        const indianIds = WA_INDIAN_RETAILER_IDS;
-        if (importedIds.length || indianIds.length) {
-          return sendProductListSections(to, {
-            ...(importedIds.length ? { Imported: importedIds } : {}),
-            ...(indianIds.length ? { Indian: indianIds } : {})
-          });
-        }
-        const entryId = await chooseCatalogEntryRetailerId();
-        return sendSingleProduct(to, 'Browse our catalog', entryId);
-      }
-      if (!sess.business_name) {
-        sess.state = 'business_name';
-        await dbSaveSession(waUserId, sess);
-        return sendText(to, 'Please share your business name.');
-      }
-      if (!sess.business_address) {
-        sess.state = 'business_address';
-        await dbSaveSession(waUserId, sess);
-        return sendText(to, 'Please enter your full business address (including city and pincode).');
-      }
-      sess.state = 'types';
+      sess.state = 'web_checkout';
       await dbSaveSession(waUserId, sess);
-      return showTypes(to, sess);
+      return;
     }
     if (isNo) {
       sess.state = 'start';

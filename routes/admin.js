@@ -1,0 +1,315 @@
+import { google } from 'googleapis';
+import { fetchSets, fetchSetProductsDetailed } from '../lib/graph.js';
+import { getOrCreateMediaIdForGcsPath } from '../lib/media.js';
+import { sendImageByMediaId } from '../lib/wa.js';
+import { Storage } from '@google-cloud/storage';
+import { upsertCatalogItems } from '../firestore.js';
+
+const SYNC_SHARED_SECRET = process.env.SYNC_SHARED_SECRET || '';
+const WA_GRAPH_TOKEN = process.env.WA_GRAPH_TOKEN || process.env.WA_CATALOG_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '';
+const WA_CATALOG_ID = process.env.WA_CATALOG_ID || '';
+const WA_SET_IMPORTED_ID = process.env.WA_SET_IMPORTED_ID || '';
+const WA_SET_INDIAN_ID = process.env.WA_SET_INDIAN_ID || '';
+const WA_SET_IMPORTED_NAME = process.env.WA_SET_IMPORTED_NAME || 'Imported brands';
+const WA_SET_INDIAN_NAME = process.env.WA_SET_INDIAN_NAME || 'Indian brands';
+
+function nowIso() { return new Date().toISOString(); }
+
+export function registerAdminRoutes(app, adminDb) {
+  // --- Admin: Sync products from Commerce Manager (Catalog) into Firestore ---
+  // Usage: GET /admin/sync-from-cm
+  // Auth: header X-Shared-Secret must equal SYNC_SHARED_SECRET if set
+  app.get('/admin/sync-from-cm', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+      if (!WA_GRAPH_TOKEN || !WA_CATALOG_ID) {
+        return res.status(400).json({ ok: false, error: 'WA_GRAPH_TOKEN and WA_CATALOG_ID required' });
+      }
+
+      async function resolveSetIdByName(name) {
+        const sets = await fetchSets();
+        const found = sets.find(s => (s.name || '').toLowerCase() === String(name || '').toLowerCase());
+        return (found && found.id) || '';
+      }
+
+      let importedSetId = WA_SET_IMPORTED_ID;
+      if (!importedSetId && WA_SET_IMPORTED_NAME) importedSetId = await resolveSetIdByName(WA_SET_IMPORTED_NAME);
+      let indianSetId = WA_SET_INDIAN_ID;
+      if (!indianSetId && WA_SET_INDIAN_NAME) indianSetId = await resolveSetIdByName(WA_SET_INDIAN_NAME);
+
+      const [imported, indian] = await Promise.all([
+        importedSetId ? fetchSetProductsDetailed(importedSetId) : Promise.resolve([]),
+        indianSetId ? fetchSetProductsDetailed(indianSetId) : Promise.resolve([])
+      ]);
+
+      const types = [];
+      const productsByType = {};
+      const batch = adminDb.batch();
+
+      async function upsertType(typeKey, arr) {
+        if (!arr || !arr.length) return;
+        types.push(typeKey);
+        const itemsMini = [];
+        for (const p of arr) {
+          const sku = String(p.retailer_id || '').toLowerCase();
+          if (!sku) continue;
+          const images = [p.image_url, ...(Array.isArray(p.additional_image_urls) ? p.additional_image_urls : [])].filter(Boolean);
+          const heroIdx = 0;
+          const prodDoc = {
+            sku,
+            type: typeKey,
+            title: p.name || sku.toUpperCase(),
+            price: Number(p.price || 0) || 0,
+            currency: (p.currency || 'INR').toUpperCase(),
+            images,
+            hero_image_index: heroIdx,
+            active: true,
+            updated_at: nowIso()
+          };
+          const ref = adminDb.collection('products').doc(sku);
+          batch.set(ref, prodDoc, { merge: true });
+          itemsMini.push({ sku, title: prodDoc.title, hero_url: images[heroIdx] || '', image_count: images.length });
+        }
+        productsByType[typeKey] = itemsMini;
+        const refType = adminDb.collection('products_by_type').doc(typeKey);
+        batch.set(refType, { type: typeKey, items: itemsMini, updated_at: nowIso() }, { merge: true });
+      }
+
+      await upsertType('imported', imported);
+      await upsertType('indian', indian);
+
+      const cfgRef = adminDb.collection('config').doc('types');
+      if (types.length) batch.set(cfgRef, { types, updated_at: nowIso() }, { merge: true });
+
+      await batch.commit();
+
+      return res.status(200).json({ ok: true, counts: { imported: (imported || []).length, indian: (indian || []).length } });
+    } catch (e) {
+      console.error('sync-from-cm error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: public test to send one image by GCS path via media_id cache ---
+  app.post('/admin/test-media', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+      const to = (req.body?.to || '').toString().trim();
+      const gcsPath = (req.body?.gcsPath || '').toString().trim();
+      if (!to || !gcsPath) return res.status(400).json({ ok: false, error: 'to and gcsPath required' });
+      const mediaId = await getOrCreateMediaIdForGcsPath(gcsPath);
+      const r = await sendImageByMediaId(to, mediaId, 'Test image');
+      return res.status(200).json({ ok: true, mediaId, result: r });
+    } catch (e) {
+      console.error('test-media error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: GCS indexer to Firestore ---
+  app.post('/admin/reindex-gcs', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+      const MEDIA_BUCKET = process.env.MEDIA_BUCKET || '';
+      const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/+$/g, '');
+      const MEDIA_HERO_SUFFIX = process.env.MEDIA_HERO_SUFFIX || '-1.jpg';
+      const storage = new Storage();
+
+      async function listPrefixes(prefix) {
+        const [files, , apiResponse] = await storage.bucket(MEDIA_BUCKET).getFiles({ prefix, delimiter: '/' });
+        return (apiResponse?.prefixes || []).map(p => p);
+      }
+      async function listFiles(prefix) {
+        const [files] = await storage.bucket(MEDIA_BUCKET).getFiles({ prefix });
+        return files.map(f => f.name);
+      }
+      function lastSegment(path) {
+        const s = path.endsWith('/') ? path.slice(0, -1) : path;
+        const i = s.lastIndexOf('/');
+        return i >= 0 ? s.slice(i + 1) : s;
+      }
+      function toGsPath(objectName) {
+        return `gs://${MEDIA_BUCKET}/${objectName}`;
+      }
+      function isImage(name) {
+        const l = name.toLowerCase();
+        return (l.endsWith('.jpg') || l.endsWith('.jpeg') || l.endsWith('.png') || l.endsWith('.webp')) && !l.endsWith('/.ds_store');
+      }
+
+      const base = MEDIA_BASE_PREFIX ? `${MEDIA_BASE_PREFIX}/` : '';
+      const typePrefixes = await listPrefixes(base);
+      const types = typePrefixes.map(p => lastSegment(p));
+
+      const batchWrites = [];
+      const productsByType = {};
+
+      for (const type of types) {
+        const skuPrefixes = await listPrefixes(`${base}${type}/`);
+        const itemsForType = [];
+        for (const skuPrefix of skuPrefixes) {
+          const sku = lastSegment(skuPrefix);
+          const objectNames = (await listFiles(`${skuPrefix}`)).filter(isImage);
+          const direct = objectNames.filter(n => n.split('/').length === skuPrefix.split('/').length);
+          const images = (direct.length ? direct : objectNames)
+            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+            .map(toGsPath);
+          if (images.length === 0) continue;
+          let heroIdx = 0;
+          const idx = images.findIndex(u => u.toLowerCase().includes(MEDIA_HERO_SUFFIX.replace(/^\./, '').toLowerCase().split('.jpg')[0]));
+          if (idx >= 0) heroIdx = idx;
+
+          const prodDoc = {
+            sku,
+            type,
+            title: sku,
+            category: '',
+            images,
+            hero_image_index: heroIdx,
+            active: true,
+            created_at: nowIso(),
+            updated_at: nowIso()
+          };
+          batchWrites.push({ kind: 'product', data: prodDoc });
+          itemsForType.push({ sku, title: prodDoc.title, hero_url: images[heroIdx], image_count: images.length });
+        }
+        productsByType[type] = itemsForType;
+      }
+
+      const batch = adminDb.batch();
+      for (const w of batchWrites) {
+        if (w.kind === 'product') {
+          const ref = adminDb.collection('products').doc(w.data.sku);
+          batch.set(ref, w.data, { merge: true });
+        }
+      }
+      for (const [type, items] of Object.entries(productsByType)) {
+        const ref = adminDb.collection('products_by_type').doc(type);
+        batch.set(ref, { type, items, updated_at: nowIso() }, { merge: true });
+      }
+      const cfgRef = adminDb.collection('config').doc('types');
+      batch.set(cfgRef, { types, updated_at: nowIso() }, { merge: true });
+
+      await batch.commit();
+      return res.status(200).json({ ok: true, types, counts: Object.fromEntries(Object.entries(productsByType).map(([k, v]) => [k, v.length])) });
+    } catch (e) {
+      console.error('reindex-gcs error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: Sync catalog from Google Sheets ---
+  // Usage: GET /admin/sync-catalog-from-sheets?sheetId=...&range=Catalog!A1:Z&mode=dry-run|commit
+  app.get('/admin/sync-catalog-from-sheets', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+      const sheetId = (req.query.sheetId || '').toString().trim();
+      const range = (req.query.range || 'Catalog!A1:Z').toString().trim();
+      const mode = (req.query.mode || 'dry-run').toString();
+      if (!sheetId) return res.status(400).json({ ok: false, error: 'sheetId required' });
+
+      const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'] });
+      const sheets = google.sheets({ version: 'v4', auth });
+      const g = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
+      const values = g.data.values || [];
+      if (values.length < 2) return res.status(200).json({ ok: false, error: 'No data rows found (need header + at least one row).' });
+      const header = values[0].map(h => (h || '').toString().trim());
+
+      const rows = [];
+      for (let i = 1; i < values.length; i++) {
+        const r = values[i];
+        const obj = {};
+        for (let c = 0; c < header.length; c++) {
+          const key = header[c];
+          if (!key) continue;
+          obj[key.replace(/\s+/g, '_').toLowerCase()] = r[c];
+        }
+        if (Object.keys(obj).length) rows.push(obj);
+      }
+
+      const { errors, upserts } = validateRows(rows);
+      if (mode === 'commit' && errors.length === 0) {
+        await upsertCatalogItems(upserts);
+      }
+      return res.status(200).json({ ok: true, mode, upsertCount: upserts.length, errorCount: errors.length, errors });
+    } catch (e) {
+      console.error('sync-catalog-from-sheets error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: Export products as CSV for pricing seeding ---
+  app.get('/admin/export-products-csv', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+      const snap = await adminDb.collection('products').get();
+      const rows = [];
+      function esc(v) {
+        const s = (v === undefined || v === null) ? '' : String(v);
+        if (s.includes('"') || s.includes(',') || s.includes('\n')) return '"' + s.replaceAll('"', '""') + '"';
+        return s;
+      }
+      rows.push(['SKU', 'Title', 'Type', 'Price', 'Currency', 'MOQ', 'Hero_URL', 'Image_Count', 'All_Images'].join(','));
+      for (const d of snap.docs) {
+        const p = d.data() || {};
+        const sku = p.sku || d.id;
+        const title = p.title || '';
+        const type = p.type || '';
+        const price = p.price || '';
+        const currency = p.currency || 'INR';
+        const moq = Number.isInteger(p.moq) ? p.moq : '';
+        const images = Array.isArray(p.images) ? p.images : [];
+        const heroIdx = Number.isInteger(p.hero_image_index) ? p.hero_image_index : 0;
+        const hero = images[heroIdx] || '';
+        const all = images.join(' ');
+        rows.push([esc(sku), esc(title), esc(type), esc(price), esc(currency), esc(moq), esc(hero), esc(images.length), esc(all)].join(','));
+      }
+      const csv = rows.join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="products_export.csv"');
+      return res.status(200).send(csv);
+    } catch (e) {
+      console.error('export-products-csv error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+}
+
+function validateRows(rows) {
+  const errors = [];
+  const upserts = [];
+  const seen = new Set();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || {};
+    const sku = (r.sku || '').toString().trim().toUpperCase();
+    if (!sku) { errors.push({ row: i + 1, field: 'sku', error: 'required' }); continue; }
+    if (seen.has(sku)) { errors.push({ row: i + 1, field: 'sku', error: 'duplicate in request' }); continue; }
+    seen.add(sku);
+    const price = Number(r.price);
+    if (!Number.isFinite(price) || price <= 0) { errors.push({ row: i + 1, field: 'price', error: 'invalid' }); continue; }
+    const currency = (r.currency || 'INR').toString().trim().toUpperCase();
+    const moq = parseInt(r.moq || '1', 10);
+    if (!Number.isInteger(moq) || moq <= 0) { errors.push({ row: i + 1, field: 'moq', error: 'invalid' }); continue; }
+    const image_url = (r.image_url || r.imageUrl || '').toString().trim();
+    const title = (r.title || '').toString().trim();
+    const active = !!(r.active === true || r.active === 'TRUE' || r.active === 'true' || r.active === 1);
+    const base = { sku, title, category: r.category || '', price, currency, moq, sizes: r.sizes || [], colors: r.colors || [], active, updated_at: nowIso() };
+    const up = image_url ? { ...base, image_url } : base;
+    upserts.push(up);
+  }
+  return { errors, upserts };
+}

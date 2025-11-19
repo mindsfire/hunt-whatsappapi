@@ -51,6 +51,11 @@ export default function Page() {
   const [prodPage, setProdPage] = useState(1);
   const [prodPageCount, setProdPageCount] = useState(1);
 
+  // Gallery modal state
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryItem, setGalleryItem] = useState<{ content_id: string; title: string; images: string[]; hero_index: number } | null>(null);
+  const [galleryIndex, setGalleryIndex] = useState(0);
+
   useEffect(() => {
     if (!waId || !token) return;
     setLoading(true);
@@ -64,8 +69,6 @@ export default function Page() {
         // Ensure defaults
         const norm = its.map((it) => ({ ...it, qty: it.qty || 1 }));
         setItems(norm);
-        if (j.business?.name) setBizName(j.business.name);
-        if (j.business?.address) setBizAddr(j.business.address);
         setLoading(false);
       })
       .catch((e) => {
@@ -91,6 +94,21 @@ export default function Page() {
       })
       .catch(() => setProdLoading(false));
   }, [waId, token, browseType, prodPage]);
+
+  const openGallery = async (content_id: string) => {
+    try {
+      const r = await fetch(`/api/product?id=${encodeURIComponent(content_id)}&u=${encodeURIComponent(waId)}&t=${encodeURIComponent(token)}`);
+      if (!r.ok) throw new Error(`Product error ${r.status}`);
+      const j = await r.json();
+      const images: string[] = Array.isArray(j.images) ? j.images : [];
+      const hero = Number.isInteger(j.hero_image_index) ? j.hero_image_index : 0;
+      setGalleryItem({ content_id, title: j.title || content_id.toUpperCase(), images, hero_index: hero });
+      setGalleryIndex(Math.max(0, Math.min(hero, images.length - 1)));
+      setGalleryOpen(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const total = useMemo(() => {
     return items.reduce((s, it) => s + (it.qty || 0) * (it.price || 0), 0);
@@ -189,9 +207,14 @@ export default function Page() {
                     )}
                     <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.title}</div>
                     <div style={{ opacity: 0.8, fontSize: 14, marginBottom: 8 }}>{p.currency} {p.price}</div>
-                    <button onClick={() => onAddProduct(p)} style={{ padding: "6px 10px", background: "#2563eb", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
-                      Add
-                    </button>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => onAddProduct(p)} style={{ padding: "6px 10px", background: "#2563eb", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
+                        Add
+                      </button>
+                      <button onClick={() => openGallery(p.content_id)} style={{ padding: "6px 10px", background: "#374151", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
+                        View Images
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -247,6 +270,34 @@ export default function Page() {
             </button>
           </div>
         </>
+      )}
+
+      {/* Gallery modal */}
+      {galleryOpen && galleryItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 1000 }}>
+          <div style={{ background: '#0b0b0b', border: '1px solid #333', borderRadius: 10, width: 'min(960px, 95vw)', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #222' }}>
+              <div style={{ fontWeight: 600, flex: 1 }}>{galleryItem.title}</div>
+              <button onClick={() => setGalleryOpen(false)} style={{ background: 'transparent', color: '#eaeaea', border: 0, fontSize: 18, cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: 12, padding: 12 }}>
+              {/* Thumbnails */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: '70vh' }}>
+                {galleryItem.images.map((img, idx) => (
+                  <img key={idx} src={img} onClick={() => setGalleryIndex(idx)} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 6, border: idx === galleryIndex ? '2px solid #16a34a' : '1px solid #333', cursor: 'pointer' }} />
+                ))}
+              </div>
+              {/* Main image */}
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 360 }}>
+                {galleryItem.images[galleryIndex] ? (
+                  <img src={galleryItem.images[galleryIndex]} style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 8, border: '1px solid #333' }} />
+                ) : (
+                  <div style={{ width: '100%', height: 360, background: '#111', borderRadius: 8 }} />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
