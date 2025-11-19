@@ -135,24 +135,36 @@ export default function Page() {
   };
 
   const placeOrder = async () => {
-    setPlacing(true);
-    setError(null);
+    if (!items.length || placing) return;
+    const name = bizName.trim();
+    const address = bizAddr.trim();
+    if (!name || !address) {
+      alert("Please enter Business name and Full address before placing the order.");
+      return;
+    }
     try {
-      const res = await fetch("/api/order", {
+      setPlacing(true);
+      const body = {
+        u: waId,
+        t: token,
+        items: items.map((it) => ({ content_id: it.content_id, qty: it.qty, size: it.size })),
+        business: { name, address }
+      };
+      const resp = await fetch(`/api/order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          u: waId,
-          t: token,
-          items: items.map(({ content_id, qty, size }) => ({ content_id, qty, size })),
-          business: { name: bizName, address: bizAddr },
-        }),
+        body: JSON.stringify(body)
       });
-      if (!res.ok) throw new Error(`Order error ${res.status}`);
-      const j = await res.json();
-      setOrderId(j.id || j.order_id || null);
-    } catch (e: any) {
-      setError(String(e?.message || e));
+      const j = await resp.json();
+      if (!j.ok) {
+        alert(j.error || "Failed to place order");
+        return;
+      }
+      setOrderId(j.id || "");
+      setItems([]);
+    } catch (e) {
+      console.error(e);
+      alert("Unexpected error placing order");
     } finally {
       setPlacing(false);
     }
@@ -235,7 +247,7 @@ export default function Page() {
             )}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 8, paddingRight: 8 }}>
             {items.map((it, i) => (
               <div key={it.content_id} style={{ display: "flex", gap: 12, border: "1px solid #333", borderRadius: 8, padding: 12 }}>
                 {it.image_url ? (
@@ -264,20 +276,42 @@ export default function Page() {
             ))}
           </div>
 
-          <div style={{ marginTop: 16, borderTop: "1px solid #333", paddingTop: 12 }}>
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>Business</div>
-            <input placeholder="Business name" value={bizName} onChange={(e) => setBizName(e.target.value)} style={{ width: "100%", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, marginBottom: 8 }} />
-            <textarea placeholder="Full address" value={bizAddr} onChange={(e) => setBizAddr(e.target.value)} rows={4} style={{ width: "100%", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }} />
+          <div style={{ marginTop: 16, borderTop: "1px solid #333", paddingTop: 12, paddingLeft: 8, paddingRight: 8 }}>
+            <div style={{ marginBottom: 8, fontWeight: 600, textAlign: "left" }}>Business</div>
+            <input
+              placeholder="Business name"
+              value={bizName}
+              onChange={(e) => setBizName(e.target.value)}
+              maxLength={40}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, marginBottom: 8, fontSize: 14, lineHeight: "1.4" }}
+            />
+            <textarea
+              placeholder="Full address"
+              value={bizAddr}
+              onChange={(e) => setBizAddr(e.target.value)}
+              rows={4}
+              maxLength={200}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, fontSize: 14, lineHeight: "1.4" }}
+            />
           </div>
 
-          <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 8, paddingRight: 8 }}>
             <div style={{ fontWeight: 600 }}>Total: {total.toFixed(2)}</div>
-            <button onClick={placeOrder} disabled={placing || items.length === 0} style={{ padding: "10px 16px", background: "#16a34a", color: "white", border: 0, borderRadius: 8, cursor: "pointer" }}>
+            <button onClick={placeOrder} disabled={placing || items.length === 0 || !bizName.trim() || !bizAddr.trim()} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
               {placing ? "Placing…" : "Place Order"}
             </button>
           </div>
         </>
       )}
+
+      {/* Company footer */}
+      <div style={{ marginTop: 32, padding: "16px 12px 24px", borderTop: "1px solid #222", fontSize: 12, lineHeight: 1.5, color: "#9ca3af", textAlign: "center" }}>
+        <div style={{ fontWeight: 600, color: "#e5e5e5", marginBottom: 4 }}>Mans Impex - Wholesale Dealers</div>
+        <div style={{ marginBottom: 6 }}>GST - 29HCSPS6716N1ZA</div>
+        <div>Reg Address: Ward No 17, Assessment No 10323, Kalenahalli Hosa Badavane</div>
+        <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>
+        <div>Karnataka, India</div>
+      </div>
 
       {/* Gallery modal */}
       {galleryOpen && galleryItem && (
