@@ -1,0 +1,253 @@
+"use client";
+import React, { useEffect, useMemo, useState } from "react";
+
+function useQuery() {
+  const [query, setQuery] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    const q: Record<string, string> = {};
+    u.searchParams.forEach((v, k) => (q[k] = v));
+    setQuery(q);
+  }, []);
+  return query;
+}
+
+type CartItem = {
+  content_id: string;
+  title: string;
+  price: number;
+  currency: string;
+  image_url?: string;
+  size?: string;
+  qty?: number;
+};
+
+type Product = {
+  content_id: string;
+  title: string;
+  price: number;
+  currency: string;
+  image_url?: string;
+};
+
+export default function Page() {
+  const query = useQuery();
+  const waId = query["u"] || "";
+  const token = query["t"] || "";
+  const lang = (query["lang"] || "en").toLowerCase();
+
+  const [items, setItems] = useState<CartItem[]>([]);
+  const [bizName, setBizName] = useState("");
+  const [bizAddr, setBizAddr] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [placing, setPlacing] = useState(false);
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Browse state
+  const [browseType, setBrowseType] = useState<"indian" | "imported">("indian");
+  const [prods, setProds] = useState<Product[]>([]);
+  const [prodLoading, setProdLoading] = useState(false);
+  const [prodPage, setProdPage] = useState(1);
+  const [prodPageCount, setProdPageCount] = useState(1);
+
+  useEffect(() => {
+    if (!waId || !token) return;
+    setLoading(true);
+    fetch(`/api/cart?u=${encodeURIComponent(waId)}&t=${encodeURIComponent(token)}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Cart error ${r.status}`);
+        return r.json();
+      })
+      .then((j) => {
+        const its: CartItem[] = Array.isArray(j.items) ? j.items : [];
+        // Ensure defaults
+        const norm = its.map((it) => ({ ...it, qty: it.qty || 1 }));
+        setItems(norm);
+        if (j.business?.name) setBizName(j.business.name);
+        if (j.business?.address) setBizAddr(j.business.address);
+        setLoading(false);
+      })
+      .catch((e) => {
+        setError(String(e));
+        setLoading(false);
+      });
+  }, [waId, token]);
+
+  // Fetch products for browse
+  useEffect(() => {
+    if (!waId || !token) return;
+    setProdLoading(true);
+    fetch(`/api/products?u=${encodeURIComponent(waId)}&t=${encodeURIComponent(token)}&type=${browseType}&page=${prodPage}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Products error ${r.status}`);
+        return r.json();
+      })
+      .then((j) => {
+        const its: Product[] = Array.isArray(j.items) ? j.items : [];
+        setProds(its);
+        setProdPageCount(Number(j.pageCount || 1));
+        setProdLoading(false);
+      })
+      .catch(() => setProdLoading(false));
+  }, [waId, token, browseType, prodPage]);
+
+  const total = useMemo(() => {
+    return items.reduce((s, it) => s + (it.qty || 0) * (it.price || 0), 0);
+  }, [items]);
+
+  const onQtyChange = (idx: number, v: number) => {
+    setItems((arr) => arr.map((it, i) => (i === idx ? { ...it, qty: Math.max(1, Math.floor(v || 1)) } : it)));
+  };
+  const onSizeChange = (idx: number, v: string) => {
+    setItems((arr) => arr.map((it, i) => (i === idx ? { ...it, size: v } : it)));
+  };
+
+  const onAddProduct = (p: Product) => {
+    setItems((arr) => {
+      const idx = arr.findIndex((x) => x.content_id === p.content_id);
+      if (idx >= 0) {
+        const copy = [...arr];
+        const cur = copy[idx];
+        copy[idx] = { ...cur, qty: (cur.qty || 1) + 1 };
+        return copy;
+      }
+      return [...arr, { ...p, qty: 1 } as CartItem];
+    });
+  };
+
+  const placeOrder = async () => {
+    setPlacing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          u: waId,
+          t: token,
+          items: items.map(({ content_id, qty, size }) => ({ content_id, qty, size })),
+          business: { name: bizName, address: bizAddr },
+        }),
+      });
+      if (!res.ok) throw new Error(`Order error ${res.status}`);
+      const j = await res.json();
+      setOrderId(j.id || j.order_id || null);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setPlacing(false);
+    }
+  };
+
+  return (
+    <div>
+      <h1 style={{ margin: "8px 0 16px" }}>Checkout</h1>
+      {!waId || !token ? (
+        <div>Missing link parameters.</div>
+      ) : loading ? (
+        <div>Loading…</div>
+      ) : orderId ? (
+        <div style={{ padding: 16, background: "#0f1b12", border: "1px solid #1f8b4c", borderRadius: 8 }}>
+          <div style={{ fontSize: 18, marginBottom: 8 }}>Order placed successfully</div>
+          <div>Order ID: <b>{orderId}</b></div>
+        </div>
+      ) : (
+        <>
+          {error && (
+            <div style={{ padding: 12, background: "#2a0f0f", border: "1px solid #b34141", borderRadius: 8, marginBottom: 12 }}>
+              {error}
+            </div>
+          )}
+
+          {/* Browse */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button
+                onClick={() => { setBrowseType("indian"); setProdPage(1); }}
+                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: browseType === "indian" ? "#222" : "#111", color: "#eaeaea" }}
+              >
+                Indian
+              </button>
+              <button
+                onClick={() => { setBrowseType("imported"); setProdPage(1); }}
+                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: browseType === "imported" ? "#222" : "#111", color: "#eaeaea" }}
+              >
+                Imported
+              </button>
+            </div>
+            {prodLoading ? (
+              <div>Loading products…</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+                {prods.map((p) => (
+                  <div key={p.content_id} style={{ border: "1px solid #333", borderRadius: 8, padding: 12 }}>
+                    {p.image_url ? (
+                      <img src={p.image_url} alt={p.title} style={{ width: "100%", height: 140, objectFit: "cover", borderRadius: 6, marginBottom: 8 }} />
+                    ) : (
+                      <div style={{ width: "100%", height: 140, background: "#222", borderRadius: 6, marginBottom: 8 }} />
+                    )}
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.title}</div>
+                    <div style={{ opacity: 0.8, fontSize: 14, marginBottom: 8 }}>{p.currency} {p.price}</div>
+                    <button onClick={() => onAddProduct(p)} style={{ padding: "6px 10px", background: "#2563eb", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
+                      Add
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {prodPageCount > 1 && (
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+                <button disabled={prodPage <= 1} onClick={() => setProdPage((p) => Math.max(1, p - 1))} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: "#111", color: "#eaeaea" }}>Prev</button>
+                <div style={{ alignSelf: "center", opacity: 0.8 }}>Page {prodPage} / {prodPageCount}</div>
+                <button disabled={prodPage >= prodPageCount} onClick={() => setProdPage((p) => Math.min(prodPageCount, p + 1))} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: "#111", color: "#eaeaea" }}>Next</button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {items.map((it, i) => (
+              <div key={it.content_id} style={{ display: "flex", gap: 12, border: "1px solid #333", borderRadius: 8, padding: 12 }}>
+                {it.image_url ? (
+                  <img src={it.image_url} alt={it.title} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8 }} />
+                ) : (
+                  <div style={{ width: 72, height: 72, background: "#222", borderRadius: 8 }} />
+                )}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{it.title}</div>
+                  <div style={{ opacity: 0.8, fontSize: 14 }}>
+                    {it.currency} {it.price}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <select value={it.size || ""} onChange={(e) => onSizeChange(i, e.target.value)} style={{ padding: 6, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }}>
+                      <option value="">Select size</option>
+                      <option>S</option>
+                      <option>M</option>
+                      <option>L</option>
+                      <option>XL</option>
+                      <option>2XL</option>
+                    </select>
+                    <input type="number" min={1} value={it.qty || 1} onChange={(e) => onQtyChange(i, Number(e.target.value))} style={{ width: 90, padding: 6, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 16, borderTop: "1px solid #333", paddingTop: 12 }}>
+            <div style={{ marginBottom: 8, fontWeight: 600 }}>Business</div>
+            <input placeholder="Business name" value={bizName} onChange={(e) => setBizName(e.target.value)} style={{ width: "100%", padding: 10, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, marginBottom: 8 }} />
+            <textarea placeholder="Full address" value={bizAddr} onChange={(e) => setBizAddr(e.target.value)} rows={4} style={{ width: "100%", padding: 10, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }} />
+          </div>
+
+          <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontWeight: 600 }}>Total: {total.toFixed(2)}</div>
+            <button onClick={placeOrder} disabled={placing || items.length === 0} style={{ padding: "10px 16px", background: "#16a34a", color: "white", border: 0, borderRadius: 8, cursor: "pointer" }}>
+              {placing ? "Placing…" : "Place Order"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
