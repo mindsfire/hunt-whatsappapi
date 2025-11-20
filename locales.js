@@ -65,7 +65,7 @@ export const messages = {
     CATALOG_IMAGE_CAPTION: "{sku} | {title}\nPrice: {price} {currency}\nMOQ: {moq}\nType 'add {sku} <QTY>'",
     CATALOG_FOOTER: "Reply 'add <SKU> <QTY>' to add items, 'cart' to view, or 'checkout' to place order.",
     LANG_GATE_HEADER: "Welcome to Mans Impex!",
-    LANG_GATE_BODY: "*Choose your language from the list below:*\n\nEnglish\nಕನ್ನಡ\nதமிழ்\nతెలుగు\nहिन्दी\nമലയാളം",
+    LANG_GATE_BODY: "*Choose your language from the list below:*\n\nहिन्दी\nEnglish\nಕನ್ನಡ\nதமிழ்\nతెలుగు\nമലയാളം",
     LANG_GATE_FOOTER: "Tap a language to continue.",
     BUTTON_START: "Start again"
   },
