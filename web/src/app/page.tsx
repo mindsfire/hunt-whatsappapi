@@ -28,6 +28,7 @@ type Product = {
   price: number;
   currency: string;
   image_url?: string;
+  description?: string;
 };
 
 export default function Page() {
@@ -58,6 +59,15 @@ export default function Page() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryItem, setGalleryItem] = useState<{ content_id: string; title: string; images: string[]; hero_index: number } | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
+
+  // Toast notification state
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   useEffect(() => {
     if (!waId || !token) return;
@@ -137,6 +147,7 @@ export default function Page() {
       }
       return [...arr, { ...p, qty: 1 } as CartItem];
     });
+    setToast("Added to cart");
   };
 
   const onRemoveItem = (idx: number) => {
@@ -190,13 +201,32 @@ export default function Page() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0 16px", gap: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          margin: "32px 0 32px",
+          gap: 16,
+        }}
+      >
         <img
           src="/checkout/hunt-logo.jpg"
           alt="Hunt Wholesale"
-          style={{ height: 56, maxWidth: 240, objectFit: "contain" }}
+          style={{ height: 160, maxWidth: 280, objectFit: "contain" }}
         />
-        <h1 style={{ margin: 0 }}>Checkout</h1>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            lineHeight: 1.1,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "Poppins, system-ui, -apple-system, sans-serif" }}>Wholesale</div>
+          <div style={{ fontSize: 13, fontStyle: "italic", opacity: 0.75, fontFamily: "Poppins, system-ui, -apple-system, sans-serif" }}>Fabric Dealers</div>
+        </div>
       </div>
       {!waId || !token ? (
         <div>Missing link parameters.</div>
@@ -217,18 +247,18 @@ export default function Page() {
 
           {/* Browse */}
           <div style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 12, marginBottom: 12, justifyContent: "center" }}>
               <button
                 onClick={() => { setBrowseType("indian"); setProdPage(1); }}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: browseType === "indian" ? "#222" : "#111", color: "#eaeaea" }}
+                style={{ padding: "12px 24px", borderRadius: 6, border: "1px solid #333", background: browseType === "indian" ? "#222" : "#111", color: "#eaeaea", fontWeight: 600, fontSize: 17 }}
               >
-                Indian
+                Indian Fabric
               </button>
               <button
                 onClick={() => { setBrowseType("imported"); setProdPage(1); }}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: browseType === "imported" ? "#222" : "#111", color: "#eaeaea" }}
+                style={{ padding: "12px 24px", borderRadius: 6, border: "1px solid #333", background: browseType === "imported" ? "#222" : "#111", color: "#eaeaea", fontWeight: 600, fontSize: 17 }}
               >
-                Imported
+                Imported Fabric
               </button>
             </div>
             {prodLoading ? (
@@ -243,12 +273,41 @@ export default function Page() {
                       <div style={{ width: "100%", height: 140, background: "#222", borderRadius: 6, marginBottom: 8 }} />
                     )}
                     <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.title}</div>
+                    {p.description && (
+                      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6, maxHeight: 48, overflow: 'hidden' }}>
+                        {p.description}
+                      </div>
+                    )}
                     <div style={{ opacity: 0.8, fontSize: 14, marginBottom: 8 }}>{p.currency} {p.price}</div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => onAddProduct(p)} style={{ padding: "6px 10px", background: "#2563eb", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        onClick={() => onAddProduct(p)}
+                        style={{
+                          padding: "10px 18px",
+                          background: "#2563eb",
+                          color: "white",
+                          border: 0,
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          fontSize: 15,
+                          fontWeight: 600,
+                        }}
+                      >
                         Add
                       </button>
-                      <button onClick={() => openGallery(p.content_id)} style={{ padding: "6px 10px", background: "#374151", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
+                      <button
+                        onClick={() => openGallery(p.content_id)}
+                        style={{
+                          padding: "10px 18px",
+                          background: "#374151",
+                          color: "white",
+                          border: 0,
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          fontSize: 15,
+                          fontWeight: 500,
+                        }}
+                      >
                         View Images
                       </button>
                     </div>
@@ -413,6 +472,28 @@ export default function Page() {
         <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>
         <div>Karnataka, India</div>
       </div>
+
+      {/* Toast notification */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            bottom: 24,
+            transform: "translateX(-50%)",
+            background: "#022c22",
+            color: "#bbf7d0",
+            padding: "10px 16px",
+            borderRadius: 9999,
+            border: "1px solid #16a34a",
+            fontSize: 13,
+            boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+            zIndex: 1100,
+          }}
+        >
+          {toast}
+        </div>
+      )}
 
       {/* Gallery modal */}
       {galleryOpen && galleryItem && (

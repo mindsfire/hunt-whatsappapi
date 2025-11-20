@@ -62,6 +62,7 @@ export function registerAdminRoutes(app, adminDb) {
             sku,
             type: typeKey,
             title: p.name || sku.toUpperCase(),
+            description: (p.description || '').toString(),
             price: Number(p.price || 0) || 0,
             currency: (p.currency || 'INR').toUpperCase(),
             images,
