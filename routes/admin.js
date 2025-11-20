@@ -15,6 +15,39 @@ const WA_SET_INDIAN_NAME = process.env.WA_SET_INDIAN_NAME || 'Indian brands';
 
 function nowIso() { return new Date().toISOString(); }
 
+function parseDescriptionAndSizes(descRaw) {
+  const desc = (descRaw || '').toString();
+
+  // Try to find patterns like:
+  //  "Available in sizes: M, L, XL, 2XL" or "Sizes: M,L,XL,2XL"
+  const m = desc.match(/available in sizes\s*:?\s*([A-Za-z0-9,\s]+)/i) ||
+            desc.match(/sizes\s*:?\s*([A-Za-z0-9,\s]+)/i);
+
+  // Parse sizes list if present
+  let sizes = [];
+  let cleanDesc = desc;
+  if (m) {
+    const sizesPart = m[1] || '';
+    sizes = sizesPart
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    // Remove the matched "sizes" segment from the description for cleaner display
+    cleanDesc = desc.replace(m[0], '').replace(/\s*\|\s*$/, '').trim();
+  }
+
+  // Parse pcs per set from patterns like "8 Pcs set" / "8 pcs set"
+  let pcsPerSet = 0;
+  const pcsMatch = desc.match(/(\d+)\s*(pcs?|pieces?)\s*set/i);
+  if (pcsMatch) {
+    const n = parseInt(pcsMatch[1], 10);
+    if (Number.isFinite(n) && n > 0) pcsPerSet = n;
+  }
+
+  return { description: cleanDesc, sizes, pcs_per_set: pcsPerSet };
+}
+
 export function registerAdminRoutes(app, adminDb) {
   // --- Admin: Sync products from Commerce Manager (Catalog) into Firestore ---
   // Usage: GET /admin/sync-from-cm
@@ -58,10 +91,14 @@ export function registerAdminRoutes(app, adminDb) {
           if (!sku) continue;
           const images = [p.image_url, ...(Array.isArray(p.additional_image_urls) ? p.additional_image_urls : [])].filter(Boolean);
           const heroIdx = 0;
+          const parsed = parseDescriptionAndSizes(p.description);
           const prodDoc = {
             sku,
             type: typeKey,
             title: p.name || sku.toUpperCase(),
+            description: parsed.description,
+            sizes: parsed.sizes,
+            pcs_per_set: parsed.pcs_per_set || 0,
             price: Number(p.price || 0) || 0,
             currency: (p.currency || 'INR').toUpperCase(),
             images,

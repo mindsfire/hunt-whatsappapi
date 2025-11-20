@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useMemo, useState } from "react";
+import ProductCard, { Product as CardProduct } from "./components/ProductCard";
 
 function useQuery() {
   const [query, setQuery] = useState<Record<string, string>>({});
@@ -20,6 +21,8 @@ type CartItem = {
   image_url?: string;
   size?: string;
   qty?: number;
+  sizes?: string[];
+  pcs_per_set?: number;
 };
 
 type Product = {
@@ -28,6 +31,8 @@ type Product = {
   price: number;
   currency: string;
   image_url?: string;
+  description?: string;
+  sizes?: string[];
 };
 
 export default function Page() {
@@ -37,6 +42,7 @@ export default function Page() {
   const lang = (query["lang"] || "en").toLowerCase();
 
   const [items, setItems] = useState<CartItem[]>([]);
+  const [placedItems, setPlacedItems] = useState<CartItem[]>([]);
   const [bizName, setBizName] = useState("");
   const [bizAddr, setBizAddr] = useState("");
   const [gstin, setGstin] = useState("");
@@ -58,6 +64,15 @@ export default function Page() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryItem, setGalleryItem] = useState<{ content_id: string; title: string; images: string[]; hero_index: number } | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
+
+  // Toast notification state
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2000);
+    return () => clearTimeout(id);
+  }, [toast]);
 
   useEffect(() => {
     if (!waId || !token) return;
@@ -91,7 +106,8 @@ export default function Page() {
       })
       .then((j) => {
         const its: Product[] = Array.isArray(j.items) ? j.items : [];
-        setProds(its);
+        const sorted = [...its].sort((a, b) => (a.price || 0) - (b.price || 0));
+        setProds(sorted);
         setProdPageCount(Number(j.pageCount || 1));
         setProdLoading(false);
       })
@@ -114,8 +130,18 @@ export default function Page() {
   };
 
   const total = useMemo(() => {
-    return items.reduce((s, it) => s + (it.qty || 0) * (it.price || 0), 0);
+    return items.reduce((s, it) => {
+      const qtySets = it.qty || 0;
+      const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+      const pricePerPiece = it.price || 0;
+      return s + qtySets * pcsPerSet * pricePerPiece;
+    }, 0);
   }, [items]);
+
+  const formatCurrency = (code: string) => {
+    if ((code || '').toUpperCase() === 'INR') return '₹';
+    return code;
+  };
 
   const onQtyChange = (idx: number, v: number) => {
     setItems((arr) => arr.map((it, i) => (i === idx ? { ...it, qty: Math.max(1, Math.floor(v || 1)) } : it)));
@@ -126,17 +152,20 @@ export default function Page() {
     setSizeErrors((errs) => errs.filter((i) => i !== idx));
   };
 
-  const onAddProduct = (p: Product) => {
+  const onAddProductSized = (p: Product, size: string, qty: number) => {
+    if (!size) return;
+    const addQty = qty > 0 ? qty : 1;
     setItems((arr) => {
-      const idx = arr.findIndex((x) => x.content_id === p.content_id);
+      const idx = arr.findIndex((x) => x.content_id === p.content_id && x.size === size);
       if (idx >= 0) {
         const copy = [...arr];
         const cur = copy[idx];
-        copy[idx] = { ...cur, qty: (cur.qty || 1) + 1 };
+        copy[idx] = { ...cur, qty: (cur.qty || 1) + addQty };
         return copy;
       }
-      return [...arr, { ...p, qty: 1 } as CartItem];
+      return [...arr, { ...p, size, qty: addQty } as CartItem];
     });
+    setToast("Added to cart");
   };
 
   const onRemoveItem = (idx: number) => {
@@ -178,6 +207,7 @@ export default function Page() {
         alert(j.error || "Failed to place order");
         return;
       }
+      setPlacedItems(items);
       setOrderId(j.id || "");
       setItems([]);
     } catch (e) {
@@ -190,22 +220,77 @@ export default function Page() {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "8px 0 16px", gap: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          margin: "32px 0 32px",
+          gap: 16,
+        }}
+      >
         <img
           src="/checkout/hunt-logo.jpg"
           alt="Hunt Wholesale"
-          style={{ height: 56, maxWidth: 240, objectFit: "contain" }}
+          style={{ height: 160, maxWidth: 280, objectFit: "contain" }}
         />
-        <h1 style={{ margin: 0 }}>Checkout</h1>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            lineHeight: 1.1,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "Poppins, system-ui, -apple-system, sans-serif" }}>Wholesale</div>
+          <div style={{ fontSize: 13, fontStyle: "italic", opacity: 0.75, fontFamily: "Poppins, system-ui, -apple-system, sans-serif" }}>Fabric Dealers</div>
+        </div>
       </div>
       {!waId || !token ? (
         <div>Missing link parameters.</div>
       ) : loading ? (
         <div>Loading…</div>
       ) : orderId ? (
-        <div style={{ padding: 16, background: "#0f1b12", border: "1px solid #1f8b4c", borderRadius: 8 }}>
-          <div style={{ fontSize: 18, marginBottom: 8 }}>Order placed successfully</div>
-          <div>Order ID: <b>{orderId}</b></div>
+        <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+          <div style={{ maxWidth: 520, width: "100%", background: "#0f1b12", border: "1px solid #1f8b4c", borderRadius: 8, padding: 16, textAlign: "center" }}>
+            <div style={{ fontSize: 20, marginBottom: 6, fontWeight: 600 }}>Order placed successfully</div>
+            <div style={{ marginBottom: 12 }}>Order ID: <b>{orderId}</b></div>
+            <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 16 }}>
+              One of our sales person will contact you for the payment and delivery of the products.
+            </div>
+
+            {!!placedItems.length && (
+              <div style={{ textAlign: "left", marginTop: 4 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Bill summary</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {placedItems.map((it, i) => {
+                    const qtySets = it.qty || 0;
+                    const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+                    const pricePerPiece = it.price || 0;
+                    const lineTotal = qtySets * pcsPerSet * pricePerPiece;
+                    return (
+                      <div key={it.content_id + ':' + i} style={{ border: "1px solid #1f8b4c", borderRadius: 6, padding: 8, background: "#05140b" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                          <div style={{ fontWeight: 600 }}>{it.title}</div>
+                          <div style={{ fontSize: 13 }}>
+                            {formatCurrency(it.currency)} {pricePerPiece}
+                            {it.pcs_per_set && it.pcs_per_set > 0 ? ` x ${it.pcs_per_set} Pcs Set` : ""}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 13, opacity: 0.9 }}>
+                          Size: {it.size || '-'} &nbsp;·&nbsp; Sets: {qtySets}
+                        </div>
+                        <div style={{ fontSize: 13, marginTop: 2 }}>
+                          Line total: <b>{formatCurrency(it.currency)} {lineTotal.toFixed(2)}</b>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <>
@@ -217,18 +302,18 @@ export default function Page() {
 
           {/* Browse */}
           <div style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 12, marginBottom: 12, justifyContent: "center" }}>
               <button
                 onClick={() => { setBrowseType("indian"); setProdPage(1); }}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: browseType === "indian" ? "#222" : "#111", color: "#eaeaea" }}
+                style={{ padding: "12px 24px", borderRadius: 6, border: "1px solid #333", background: browseType === "indian" ? "#222" : "#111", color: "#eaeaea", fontWeight: 600, fontSize: 17 }}
               >
-                Indian
+                Indian Fabric
               </button>
               <button
                 onClick={() => { setBrowseType("imported"); setProdPage(1); }}
-                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #333", background: browseType === "imported" ? "#222" : "#111", color: "#eaeaea" }}
+                style={{ padding: "12px 24px", borderRadius: 6, border: "1px solid #333", background: browseType === "imported" ? "#222" : "#111", color: "#eaeaea", fontWeight: 600, fontSize: 17 }}
               >
-                Imported
+                Imported Fabric
               </button>
             </div>
             {prodLoading ? (
@@ -236,23 +321,19 @@ export default function Page() {
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
                 {prods.map((p) => (
-                  <div key={p.content_id} style={{ border: "1px solid #333", borderRadius: 8, padding: 12 }}>
-                    {p.image_url ? (
-                      <img src={p.image_url} alt={p.title} style={{ width: "100%", height: 140, objectFit: "cover", borderRadius: 6, marginBottom: 8 }} />
-                    ) : (
-                      <div style={{ width: "100%", height: 140, background: "#222", borderRadius: 6, marginBottom: 8 }} />
-                    )}
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.title}</div>
-                    <div style={{ opacity: 0.8, fontSize: 14, marginBottom: 8 }}>{p.currency} {p.price}</div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => onAddProduct(p)} style={{ padding: "6px 10px", background: "#2563eb", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
-                        Add
-                      </button>
-                      <button onClick={() => openGallery(p.content_id)} style={{ padding: "6px 10px", background: "#374151", color: "white", border: 0, borderRadius: 6, cursor: "pointer" }}>
-                        View Images
-                      </button>
-                    </div>
-                  </div>
+                  <ProductCard
+                    key={p.content_id}
+                    product={p as CardProduct}
+                    formatCurrency={formatCurrency}
+                    onAddToCart={onAddProductSized}
+                    onViewImages={openGallery}
+                    onGoToCart={() => {
+                      try {
+                        const el = document.getElementById("cart");
+                        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                      } catch (_) {}
+                    }}
+                  />
                 ))}
               </div>
             )}
@@ -265,7 +346,7 @@ export default function Page() {
             )}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 8, paddingRight: 8 }}>
+          <div id="cart" style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 8, paddingRight: 8 }}>
             {items.map((it, i) => (
               <div key={it.content_id + ':' + i} style={{ display: "flex", gap: 12, border: "1px solid #333", borderRadius: 8, padding: 12 }}>
                 {it.image_url ? (
@@ -291,7 +372,8 @@ export default function Page() {
                     </button>
                   </div>
                   <div style={{ opacity: 0.8, fontSize: 14 }}>
-                    {it.currency} {it.price}
+                    {formatCurrency(it.currency)} {it.price}
+                    {it.pcs_per_set && it.pcs_per_set > 0 ? ` x ${it.pcs_per_set} Pcs Set` : ""}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                     <div style={{ display: "flex", gap: 8 }}>
@@ -307,11 +389,9 @@ export default function Page() {
                         }}
                       >
                         <option value="">Select size</option>
-                        <option>S</option>
-                        <option>M</option>
-                        <option>L</option>
-                        <option>XL</option>
-                        <option>2XL</option>
+                        {((it.sizes && it.sizes.length) ? it.sizes : ["S", "M", "L", "XL", "2XL"]).map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
                       </select>
                       <div
                         style={{
@@ -397,7 +477,7 @@ export default function Page() {
           </div>
 
           <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 8, paddingRight: 8 }}>
-            <div style={{ fontWeight: 600 }}>Total: {total.toFixed(2)}</div>
+            <div style={{ fontWeight: 600 }}>Total: {formatCurrency(items[0]?.currency || 'INR')} {total.toFixed(2)}</div>
             <button onClick={placeOrder} disabled={placing || items.length === 0} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
               {placing ? "Placing…" : "Place Order"}
             </button>
@@ -413,6 +493,28 @@ export default function Page() {
         <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>
         <div>Karnataka, India</div>
       </div>
+
+      {/* Toast notification */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            bottom: 24,
+            transform: "translateX(-50%)",
+            background: "#022c22",
+            color: "#bbf7d0",
+            padding: "10px 16px",
+            borderRadius: 9999,
+            border: "1px solid #16a34a",
+            fontSize: 13,
+            boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+            zIndex: 1100,
+          }}
+        >
+          {toast}
+        </div>
+      )}
 
       {/* Gallery modal */}
       {galleryOpen && galleryItem && (

@@ -68,7 +68,9 @@ export function registerApiRoutes(app, adminDb) {
           const price = Number(pd.price || ci.unit_price || 0) || 0;
           const currency = (pd.currency || 'INR').toString();
           const title = pd.title || sku.toUpperCase();
-          items.push({ content_id: sku, title, price, currency, image_url, qty: Number(ci.qty || 1) });
+          const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
+          const pcs_per_set = Number(pd.pcs_per_set || 0) || 0;
+          items.push({ content_id: sku, title, price, currency, image_url, sizes, pcs_per_set, qty: Number(ci.qty || 1) });
         }
       } catch (_) {}
 
@@ -142,7 +144,7 @@ export function registerApiRoutes(app, adminDb) {
       const page = Math.max(1, parseInt((req.query.page || '1').toString(), 10) || 1);
       const pageSize = Math.max(1, Math.min(50, parseInt((req.query.pageSize || '20').toString(), 10) || 20));
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
 
       const doc = await adminDb.collection('products_by_type').doc(type).get();
       const list = doc.exists ? (doc.data().items || []) : [];
@@ -165,7 +167,10 @@ export function registerApiRoutes(app, adminDb) {
         const price = Number(pd.price || 0) || 0;
         const currency = (pd.currency || 'INR').toString();
         const title = pd.title || (it.title || sku.toUpperCase());
-        items.push({ content_id: sku, title, price, currency, image_url });
+        const description = (pd.description || '').toString();
+        const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
+        const pcs_per_set = Number(pd.pcs_per_set || 0) || 0;
+        items.push({ content_id: sku, title, price, currency, image_url, description, sizes, pcs_per_set });
       }
 
       return res.status(200).json({ ok: true, type, page: p, pageSize, total, pageCount, items });
@@ -182,21 +187,26 @@ export function registerApiRoutes(app, adminDb) {
       const tkn = (req.query.t || '').toString().trim();
       const id = (req.query.id || req.query.content_id || '').toString().toLowerCase();
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
       if (!id) return res.status(400).json({ ok: false, error: 'id required' });
 
       const pd = await getProductDoc(adminDb, id);
       if (!pd) return res.status(404).json({ ok: false, error: 'not found' });
       const images = Array.isArray(pd.images) ? pd.images : [];
       const hero_image_index = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
+      const pcs_per_set = Number(pd.pcs_per_set || 0) || 0;
+      const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
       return res.status(200).json({
         ok: true,
         content_id: id,
         title: pd.title || id.toUpperCase(),
         price: Number(pd.price || 0) || 0,
         currency: (pd.currency || 'INR').toString(),
+        description: (pd.description || '').toString(),
         images,
-        hero_image_index
+        hero_image_index,
+        sizes,
+        pcs_per_set
       });
     } catch (e) {
       console.error('GET /api/product error', e);
