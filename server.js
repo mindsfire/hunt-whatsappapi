@@ -688,7 +688,20 @@ app.get('/', (req, res) => res.status(200).send('ok'));
 // --- Static web checkout (Next.js export) ---
 try {
   const staticDir = path.join(__dirname, 'web', 'out');
-  app.use('/checkout', express.static(staticDir));
+  app.use('/checkout', express.static(staticDir, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html')) {
+        // HTML: avoid aggressive caching so clients always get latest build
+        res.setHeader('Cache-Control', 'no-store');
+      } else if (filePath.includes(`${path.sep}_next${path.sep}static${path.sep}`)) {
+        // Next.js hashed assets: safe to cache long-term
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        // Other assets (images, etc.): short/medium cache
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      }
+    }
+  }));
 } catch (e) {
   console.error('Static /checkout mount failed (non-fatal):', e);
 }

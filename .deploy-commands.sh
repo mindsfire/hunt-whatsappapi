@@ -33,3 +33,6 @@ export SYNC_SHARED_SECRET=<changeme>
 curl -X GET \
   "https://hunt-whatsappapi-876367554060.asia-south1.run.app/admin/sync-from-cm" \
   -H "X-Shared-Secret: $SYNC_SHARED_SECRET"
+
+
+https://localhost:3000/checkout/?u=dev&t=dev

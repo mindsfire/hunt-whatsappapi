@@ -39,6 +39,9 @@ export default function Page() {
   const [items, setItems] = useState<CartItem[]>([]);
   const [bizName, setBizName] = useState("");
   const [bizAddr, setBizAddr] = useState("");
+  const [gstin, setGstin] = useState("");
+  const [bizError, setBizError] = useState(false);
+  const [sizeErrors, setSizeErrors] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [placing, setPlacing] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -119,6 +122,8 @@ export default function Page() {
   };
   const onSizeChange = (idx: number, v: string) => {
     setItems((arr) => arr.map((it, i) => (i === idx ? { ...it, size: v } : it)));
+    // Clear size error for this item once user selects a size
+    setSizeErrors((errs) => errs.filter((i) => i !== idx));
   };
 
   const onAddProduct = (p: Product) => {
@@ -136,10 +141,18 @@ export default function Page() {
 
   const placeOrder = async () => {
     if (!items.length || placing) return;
+    // Validate that all items have a size selected
+    const missingSizeIdxs = items.map((it, idx) => (!it.size ? idx : -1)).filter((i) => i >= 0);
+    if (missingSizeIdxs.length) {
+      setSizeErrors(missingSizeIdxs);
+      return;
+    }
     const name = bizName.trim();
     const address = bizAddr.trim();
+    const gst = gstin.trim();
+    setBizError(false);
     if (!name || !address) {
-      alert("Please enter Business name and Full address before placing the order.");
+      setBizError(true);
       return;
     }
     try {
@@ -148,7 +161,7 @@ export default function Page() {
         u: waId,
         t: token,
         items: items.map((it) => ({ content_id: it.content_id, qty: it.qty, size: it.size })),
-        business: { name, address }
+        business: { name, address, gstin: gst }
       };
       const resp = await fetch(`/api/order`, {
         method: "POST",
@@ -260,16 +273,37 @@ export default function Page() {
                   <div style={{ opacity: 0.8, fontSize: 14 }}>
                     {it.currency} {it.price}
                   </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                    <select value={it.size || ""} onChange={(e) => onSizeChange(i, e.target.value)} style={{ padding: 6, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }}>
-                      <option value="">Select size</option>
-                      <option>S</option>
-                      <option>M</option>
-                      <option>L</option>
-                      <option>XL</option>
-                      <option>2XL</option>
-                    </select>
-                    <input type="number" min={1} value={it.qty || 1} onChange={(e) => onQtyChange(i, Number(e.target.value))} style={{ width: 90, padding: 6, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <select
+                        value={it.size || ""}
+                        onChange={(e) => onSizeChange(i, e.target.value)}
+                        style={{
+                          padding: 6,
+                          background: "#111",
+                          color: "#eaeaea",
+                          border: sizeErrors.includes(i) && !it.size ? "1px solid #b91c1c" : "1px solid #333",
+                          borderRadius: 6,
+                        }}
+                      >
+                        <option value="">Select size</option>
+                        <option>S</option>
+                        <option>M</option>
+                        <option>L</option>
+                        <option>XL</option>
+                        <option>2XL</option>
+                      </select>
+                      <input
+                        type="number"
+                        min={1}
+                        value={it.qty || 1}
+                        onChange={(e) => onQtyChange(i, Number(e.target.value))}
+                        style={{ width: 90, padding: 6, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }}
+                      />
+                    </div>
+                    {sizeErrors.includes(i) && !it.size && (
+                      <div style={{ color: "#fca5a5", fontSize: 12 }}>Select size</div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -277,27 +311,40 @@ export default function Page() {
           </div>
 
           <div style={{ marginTop: 16, borderTop: "1px solid #333", paddingTop: 12, paddingLeft: 8, paddingRight: 8 }}>
-            <div style={{ marginBottom: 8, fontWeight: 600, textAlign: "left" }}>Business</div>
+            <div style={{ marginBottom: 8, fontWeight: 600, textAlign: "left" }}>Business Details</div>
             <input
               placeholder="Business name"
               value={bizName}
               onChange={(e) => setBizName(e.target.value)}
               maxLength={40}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: bizError && !bizName.trim() ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
+            />
+            {bizError && !bizName.trim() && (
+              <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 4 }}>Business Name is required</div>
+            )}
+            <input
+              placeholder="GSTIN (optional)"
+              value={gstin}
+              onChange={(e) => setGstin(e.target.value)}
+              maxLength={20}
               style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, marginBottom: 8, fontSize: 14, lineHeight: "1.4" }}
             />
             <textarea
-              placeholder="Full address"
+              placeholder="Provide your Delivery Address"
               value={bizAddr}
               onChange={(e) => setBizAddr(e.target.value)}
               rows={4}
               maxLength={200}
-              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, fontSize: 14, lineHeight: "1.4" }}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: bizError && !bizAddr.trim() ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, fontSize: 14, lineHeight: "1.4" }}
             />
+            {bizError && !bizAddr.trim() && (
+              <div style={{ color: "#fca5a5", fontSize: 12, marginTop: 4 }}>Delivery Address is required</div>
+            )}
           </div>
 
           <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 8, paddingRight: 8 }}>
             <div style={{ fontWeight: 600 }}>Total: {total.toFixed(2)}</div>
-            <button onClick={placeOrder} disabled={placing || items.length === 0 || !bizName.trim() || !bizAddr.trim()} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
+            <button onClick={placeOrder} disabled={placing || items.length === 0} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
               {placing ? "Placing…" : "Place Order"}
             </button>
           </div>
