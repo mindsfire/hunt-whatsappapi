@@ -29,7 +29,7 @@ gcloud alpha run services logs tail hunt-whatsappapi \
   --project prod-hunt-whatsappapi
 
 # sync from cm
-export SYNC_SHARED_SECRET=<changeme>
+export SYNC_SHARED_SECRET=
 curl -X GET \
   "https://hunt-whatsappapi-876367554060.asia-south1.run.app/admin/sync-from-cm" \
   -H "X-Shared-Secret: $SYNC_SHARED_SECRET"

@@ -23,18 +23,29 @@ function parseDescriptionAndSizes(descRaw) {
   const m = desc.match(/available in sizes\s*:?\s*([A-Za-z0-9,\s]+)/i) ||
             desc.match(/sizes\s*:?\s*([A-Za-z0-9,\s]+)/i);
 
-  if (!m) return { description: desc, sizes: [] };
+  // Parse sizes list if present
+  let sizes = [];
+  let cleanDesc = desc;
+  if (m) {
+    const sizesPart = m[1] || '';
+    sizes = sizesPart
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  const sizesPart = m[1] || '';
-  const sizes = sizesPart
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+    // Remove the matched "sizes" segment from the description for cleaner display
+    cleanDesc = desc.replace(m[0], '').replace(/\s*\|\s*$/, '').trim();
+  }
 
-  // Remove the matched "sizes" segment from the description for cleaner display
-  const cleanDesc = desc.replace(m[0], '').replace(/\s*\|\s*$/, '').trim();
+  // Parse pcs per set from patterns like "8 Pcs set" / "8 pcs set"
+  let pcsPerSet = 0;
+  const pcsMatch = desc.match(/(\d+)\s*(pcs?|pieces?)\s*set/i);
+  if (pcsMatch) {
+    const n = parseInt(pcsMatch[1], 10);
+    if (Number.isFinite(n) && n > 0) pcsPerSet = n;
+  }
 
-  return { description: cleanDesc, sizes };
+  return { description: cleanDesc, sizes, pcs_per_set: pcsPerSet };
 }
 
 export function registerAdminRoutes(app, adminDb) {
@@ -87,6 +98,7 @@ export function registerAdminRoutes(app, adminDb) {
             title: p.name || sku.toUpperCase(),
             description: parsed.description,
             sizes: parsed.sizes,
+            pcs_per_set: parsed.pcs_per_set || 0,
             price: Number(p.price || 0) || 0,
             currency: (p.currency || 'INR').toUpperCase(),
             images,

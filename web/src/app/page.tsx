@@ -22,6 +22,7 @@ type CartItem = {
   size?: string;
   qty?: number;
   sizes?: string[];
+  pcs_per_set?: number;
 };
 
 type Product = {
@@ -41,6 +42,7 @@ export default function Page() {
   const lang = (query["lang"] || "en").toLowerCase();
 
   const [items, setItems] = useState<CartItem[]>([]);
+  const [placedItems, setPlacedItems] = useState<CartItem[]>([]);
   const [bizName, setBizName] = useState("");
   const [bizAddr, setBizAddr] = useState("");
   const [gstin, setGstin] = useState("");
@@ -128,7 +130,12 @@ export default function Page() {
   };
 
   const total = useMemo(() => {
-    return items.reduce((s, it) => s + (it.qty || 0) * (it.price || 0), 0);
+    return items.reduce((s, it) => {
+      const qtySets = it.qty || 0;
+      const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+      const pricePerPiece = it.price || 0;
+      return s + qtySets * pcsPerSet * pricePerPiece;
+    }, 0);
   }, [items]);
 
   const formatCurrency = (code: string) => {
@@ -200,6 +207,7 @@ export default function Page() {
         alert(j.error || "Failed to place order");
         return;
       }
+      setPlacedItems(items);
       setOrderId(j.id || "");
       setItems([]);
     } catch (e) {
@@ -244,9 +252,45 @@ export default function Page() {
       ) : loading ? (
         <div>Loading…</div>
       ) : orderId ? (
-        <div style={{ padding: 16, background: "#0f1b12", border: "1px solid #1f8b4c", borderRadius: 8 }}>
-          <div style={{ fontSize: 18, marginBottom: 8 }}>Order placed successfully</div>
-          <div>Order ID: <b>{orderId}</b></div>
+        <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+          <div style={{ maxWidth: 520, width: "100%", background: "#0f1b12", border: "1px solid #1f8b4c", borderRadius: 8, padding: 16, textAlign: "center" }}>
+            <div style={{ fontSize: 20, marginBottom: 6, fontWeight: 600 }}>Order placed successfully</div>
+            <div style={{ marginBottom: 12 }}>Order ID: <b>{orderId}</b></div>
+            <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 16 }}>
+              One of our sales person will contact you for the payment and delivery of the products.
+            </div>
+
+            {!!placedItems.length && (
+              <div style={{ textAlign: "left", marginTop: 4 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>Bill summary</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {placedItems.map((it, i) => {
+                    const qtySets = it.qty || 0;
+                    const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+                    const pricePerPiece = it.price || 0;
+                    const lineTotal = qtySets * pcsPerSet * pricePerPiece;
+                    return (
+                      <div key={it.content_id + ':' + i} style={{ border: "1px solid #1f8b4c", borderRadius: 6, padding: 8, background: "#05140b" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                          <div style={{ fontWeight: 600 }}>{it.title}</div>
+                          <div style={{ fontSize: 13 }}>
+                            {formatCurrency(it.currency)} {pricePerPiece}
+                            {it.pcs_per_set && it.pcs_per_set > 0 ? ` x ${it.pcs_per_set} Pcs Set` : ""}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 13, opacity: 0.9 }}>
+                          Size: {it.size || '-'} &nbsp;·&nbsp; Sets: {qtySets}
+                        </div>
+                        <div style={{ fontSize: 13, marginTop: 2 }}>
+                          Line total: <b>{formatCurrency(it.currency)} {lineTotal.toFixed(2)}</b>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <>
@@ -329,6 +373,7 @@ export default function Page() {
                   </div>
                   <div style={{ opacity: 0.8, fontSize: 14 }}>
                     {formatCurrency(it.currency)} {it.price}
+                    {it.pcs_per_set && it.pcs_per_set > 0 ? ` x ${it.pcs_per_set} Pcs Set` : ""}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                     <div style={{ display: "flex", gap: 8 }}>
