@@ -796,17 +796,16 @@ async function sendLanguageSelector(to) {
   const footerText = t('en', 'LANG_GATE_FOOTER');
   const buttonText = t('en', 'BUTTON_LANG_SELECT');
   const rows = [
+    { id: 'lang_hi', title: 'हिन्दी', description: '' },
     { id: 'lang_en', title: 'English', description: '' },
     { id: 'lang_kn', title: 'ಕನ್ನಡ', description: '' },
     { id: 'lang_ta', title: 'தமிழ்', description: '' },
     { id: 'lang_te', title: 'తెలుగు', description: '' },
-    { id: 'lang_hi', title: 'हिन्दी', description: '' },
     { id: 'lang_ml', title: 'മലയാളം', description: '' }
   ];
   return sendList(to, bodyText, buttonText, 'Languages', rows, headerText, footerText);
 }
 
-// --- Simple state machine ---
 async function handleMessage(waUserId, text, rawMsg) {
   const to = waUserId;
   const sess = await dbGetSession(waUserId);
