@@ -139,6 +139,11 @@ export default function Page() {
     });
   };
 
+  const onRemoveItem = (idx: number) => {
+    setItems((arr) => arr.filter((_, i) => i !== idx));
+    setSizeErrors((errs) => errs.filter((i) => i !== idx).map((i) => (i > idx ? i - 1 : i)));
+  };
+
   const placeOrder = async () => {
     if (!items.length || placing) return;
     // Validate that all items have a size selected
@@ -262,14 +267,29 @@ export default function Page() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 8, paddingRight: 8 }}>
             {items.map((it, i) => (
-              <div key={it.content_id} style={{ display: "flex", gap: 12, border: "1px solid #333", borderRadius: 8, padding: 12 }}>
+              <div key={it.content_id + ':' + i} style={{ display: "flex", gap: 12, border: "1px solid #333", borderRadius: 8, padding: 12 }}>
                 {it.image_url ? (
                   <img src={it.image_url} alt={it.title} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8 }} />
                 ) : (
                   <div style={{ width: 72, height: 72, background: "#222", borderRadius: 8 }} />
                 )}
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{it.title}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontWeight: 600 }}>{it.title}</div>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveItem(i)}
+                      style={{
+                        background: "transparent",
+                        border: 0,
+                        color: "#f97373",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
                   <div style={{ opacity: 0.8, fontSize: 14 }}>
                     {it.currency} {it.price}
                   </div>
@@ -293,13 +313,47 @@ export default function Page() {
                         <option>XL</option>
                         <option>2XL</option>
                       </select>
-                      <input
-                        type="number"
-                        min={1}
-                        value={it.qty || 1}
-                        onChange={(e) => onQtyChange(i, Number(e.target.value))}
-                        style={{ width: 90, padding: 6, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6 }}
-                      />
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          borderRadius: 6,
+                          overflow: "hidden",
+                          border: "1px solid #333",
+                          background: "#111",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onQtyChange(i, (it.qty || 1) - 1)}
+                          disabled={(it.qty || 1) <= 1}
+                          style={{
+                            padding: "4px 8px",
+                            border: 0,
+                            background: "transparent",
+                            color: (it.qty || 1) <= 1 ? "#555" : "#eaeaea",
+                            cursor: (it.qty || 1) <= 1 ? "default" : "pointer",
+                          }}
+                        >
+                          -
+                        </button>
+                        <div style={{ padding: "4px 10px", minWidth: 28, textAlign: "center", fontSize: 14 }}>
+                          {it.qty || 1}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onQtyChange(i, (it.qty || 1) + 1)}
+                          style={{
+                            padding: "4px 8px",
+                            border: 0,
+                            background: "transparent",
+                            color: "#eaeaea",
+                            cursor: "pointer",
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
                     </div>
                     {sizeErrors.includes(i) && !it.size && (
                       <div style={{ color: "#fca5a5", fontSize: 12 }}>Select size</div>
