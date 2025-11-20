@@ -101,7 +101,8 @@ export default function Page() {
       })
       .then((j) => {
         const its: Product[] = Array.isArray(j.items) ? j.items : [];
-        setProds(its);
+        const sorted = [...its].sort((a, b) => (a.price || 0) - (b.price || 0));
+        setProds(sorted);
         setProdPageCount(Number(j.pageCount || 1));
         setProdLoading(false);
       })
@@ -126,6 +127,11 @@ export default function Page() {
   const total = useMemo(() => {
     return items.reduce((s, it) => s + (it.qty || 0) * (it.price || 0), 0);
   }, [items]);
+
+  const formatCurrency = (code: string) => {
+    if ((code || '').toUpperCase() === 'INR') return '₹';
+    return code;
+  };
 
   const onQtyChange = (idx: number, v: number) => {
     setItems((arr) => arr.map((it, i) => (i === idx ? { ...it, qty: Math.max(1, Math.floor(v || 1)) } : it)));
@@ -278,7 +284,7 @@ export default function Page() {
                         {p.description}
                       </div>
                     )}
-                    <div style={{ opacity: 0.8, fontSize: 14, marginBottom: 8 }}>{p.currency} {p.price}</div>
+                    <div style={{ opacity: 0.8, fontSize: 14, marginBottom: 8 }}>{formatCurrency(p.currency)} {p.price}</div>
                     <div style={{ display: "flex", gap: 10 }}>
                       <button
                         onClick={() => onAddProduct(p)}
@@ -350,7 +356,7 @@ export default function Page() {
                     </button>
                   </div>
                   <div style={{ opacity: 0.8, fontSize: 14 }}>
-                    {it.currency} {it.price}
+                    {formatCurrency(it.currency)} {it.price}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                     <div style={{ display: "flex", gap: 8 }}>
@@ -456,7 +462,7 @@ export default function Page() {
           </div>
 
           <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 8, paddingRight: 8 }}>
-            <div style={{ fontWeight: 600 }}>Total: {total.toFixed(2)}</div>
+            <div style={{ fontWeight: 600 }}>Total: {formatCurrency(items[0]?.currency || 'INR')} {total.toFixed(2)}</div>
             <button onClick={placeOrder} disabled={placing || items.length === 0} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
               {placing ? "Placing…" : "Place Order"}
             </button>
