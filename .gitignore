@@ -16,3 +16,8 @@ logs/
 .DS_Store
 
 Dockerfile
+
+
+web/node_modules
+web/.next
+web/out

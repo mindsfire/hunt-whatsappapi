@@ -2,10 +2,18 @@ import 'dotenv/config';
 import express from 'express';
 import crypto from 'crypto';
 import process from 'process';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 import { Storage } from '@google-cloud/storage';
 import { Firestore } from '@google-cloud/firestore';
 import { t } from './locales.js';
+import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId } from './lib/wa.js';
+import { makeCheckoutToken, verifyCheckoutToken, buildCheckoutUrl } from './lib/checkout.js';
+import { graphGet, fetchSets, fetchSetItems, fetchSetProductsDetailed, parsePriceToNumber } from './lib/graph.js';
+import { getOrCreateMediaIdForGcsPath } from './lib/media.js';
+import { registerAdminRoutes } from './routes/admin.js';
+import { registerApiRoutes } from './routes/api.js';
 import {
   initDb,
   getSession as dbGetSession,
@@ -38,6 +46,24 @@ const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/
 const MEDIA_HERO_SUFFIX = process.env.MEDIA_HERO_SUFFIX || '-1.jpg';
 const MEDIA_BATCH_SIZE = parseInt(process.env.MEDIA_BATCH_SIZE || '3', 10);
 const WA_WABA_ID = process.env.WA_WABA_ID || '';
+const USE_WA_CATALOG = ((process.env.USE_WA_CATALOG || 'false').toString().toLowerCase() === 'true');
+const WA_CATALOG_ID = process.env.WA_CATALOG_ID || '';
+const WA_GRAPH_TOKEN = process.env.WA_GRAPH_TOKEN || process.env.WA_CATALOG_ACCESS_TOKEN || WA_TOKEN;
+const SHOW_CATALOG_IMMEDIATELY = ((process.env.SHOW_CATALOG_IMMEDIATELY || 'false').toString().toLowerCase() === 'true');
+const WA_SET_IMPORTED_ID = process.env.WA_SET_IMPORTED_ID || '';
+const WA_SET_INDIAN_ID = process.env.WA_SET_INDIAN_ID || '';
+const WA_SET_IMPORTED_NAME = process.env.WA_SET_IMPORTED_NAME || 'Imported brands';
+const WA_SET_INDIAN_NAME = process.env.WA_SET_INDIAN_NAME || 'Indian brands';
+const WA_IMPORTED_RETAILER_IDS = (process.env.WA_IMPORTED_RETAILER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+const WA_INDIAN_RETAILER_IDS = (process.env.WA_INDIAN_RETAILER_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
+const CHECKOUT_TOKEN_SECRET = process.env.CHECKOUT_TOKEN_SECRET || '';
+const BASE_URL = process.env.BASE_URL || '';
+
+// __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// helpers imported from ./lib/checkout.js
 
 // Locale-specific yes/no keywords for intent recognition
 // This keeps business logic independent of specific UI text and makes it easy to add locales.
@@ -68,9 +94,161 @@ const YES_NO_KEYWORDS = {
   }
 };
 
+async function chooseCatalogEntryRetailerId() {
+  // Prefer explicit env-configured IDs
+  if (WA_IMPORTED_RETAILER_IDS.length) return WA_IMPORTED_RETAILER_IDS[0];
+  if (WA_INDIAN_RETAILER_IDS.length) return WA_INDIAN_RETAILER_IDS[0];
+  // Try sets (imported first)
+  try {
+    let setId = WA_SET_IMPORTED_ID;
+    if (!setId) {
+      const sets = await fetchSets();
+      const found = sets.find(s => (s.name || '').toLowerCase() === (WA_SET_IMPORTED_NAME || '').toLowerCase());
+      setId = (found && found.id) || '';
+    }
+    const ids = await fetchSetItems(setId).catch(() => []);
+    if (ids && ids.length) return ids[0];
+  } catch (_) { }
+  try {
+    let setId = WA_SET_INDIAN_ID;
+    if (!setId) {
+      const sets = await fetchSets();
+      const found = sets.find(s => (s.name || '').toLowerCase() === (WA_SET_INDIAN_NAME || '').toLowerCase());
+      setId = (found && found.id) || '';
+    }
+    const ids = await fetchSetItems(setId).catch(() => []);
+    if (ids && ids.length) return ids[0];
+  } catch (_) { }
+  return '';
+}
+
+async function sendProductList(to, title, retailerIds) {
+  try {
+    const items = (retailerIds || []).slice(0, 30).map(id => ({ product_retailer_id: id }));
+    if (!WA_CATALOG_ID || items.length === 0) {
+      return sendText(to, `No products for ${title}.`);
+    }
+    const interactive = {
+      type: 'product_list',
+      header: { type: 'text', text: title },
+      body: { text: 'Choose a product' },
+      action: {
+        catalog_id: WA_CATALOG_ID,
+        sections: [{ title, product_items: items }]
+      }
+    };
+    await waSend({ messaging_product: 'whatsapp', to, type: 'interactive', interactive });
+    try {
+      await new Promise(r => setTimeout(r, 1200));
+      const ctaText = 'When you are ready, tap Checkout here to confirm and get an Order ID. If you already placed order in WhatsApp, tap the other button.';
+      await sendButtons(to, ctaText, [
+        { type: 'reply', reply: { id: 'checkout', title: 'Checkout' } },
+        { type: 'reply', reply: { id: 'native_order', title: 'I placed order in WhatsApp' } }
+      ]);
+      await sendText(to, 'Tip: you can also reply "checkout" here to confirm, or "native order" if you already placed it in WhatsApp.');
+      return;
+    } catch (e2) {
+      console.error('CTA after product_list failed', e2);
+      return sendText(to, 'When ready, reply "checkout" here to confirm and get an Order ID. If you already placed an order in WhatsApp, reply "native order".');
+    }
+  } catch (e) {
+    console.error('sendProductList error', e);
+    return sendText(to, `No products for ${title}.`);
+  }
+}
+
+async function sendProductListSections(to, sectionsMap) {
+  try {
+    if (!WA_CATALOG_ID) return sendText(to, 'No products available.');
+    const sections = Object.entries(sectionsMap)
+      .map(([title, ids]) => ({ title, product_items: (ids || []).slice(0, 30).map(id => ({ product_retailer_id: id })) }))
+      .filter(s => s.product_items.length > 0)
+      .slice(0, 10); // WA supports up to 10 sections
+    if (!sections.length) return sendText(to, 'No products available.');
+    const interactive = {
+      type: 'product_list',
+      header: { type: 'text', text: 'Our Catalog' },
+      body: { text: 'Choose products' },
+      action: { catalog_id: WA_CATALOG_ID, sections }
+    };
+    await waSend({ messaging_product: 'whatsapp', to, type: 'interactive', interactive });
+    try {
+      await new Promise(r => setTimeout(r, 400));
+      const ctaText = 'When you are ready, tap Checkout here to confirm and get an Order ID. If you already placed order in WhatsApp, tap the other button.';
+      return sendButtons(to, ctaText, [
+        { type: 'reply', reply: { id: 'checkout', title: 'Checkout' } },
+        { type: 'reply', reply: { id: 'native_order', title: 'I placed order in WhatsApp' } }
+      ]);
+    } catch (e2) {
+      console.error('CTA after product_list sections failed', e2);
+      return sendText(to, 'When ready, reply "checkout" here to confirm and get an Order ID. If you already placed an order in WhatsApp, reply "native order".');
+    }
+  } catch (e) {
+    console.error('sendProductListSections error', e);
+    return sendText(to, 'No products available.');
+  }
+}
+
+async function sendSingleProduct(to, bodyText, retailerId) {
+  try {
+    if (!WA_CATALOG_ID || !retailerId) {
+      return sendText(to, bodyText || 'Browse our catalog');
+    }
+    const interactive = {
+      type: 'product',
+      body: { text: bodyText || 'Browse our catalog' },
+      action: {
+        catalog_id: WA_CATALOG_ID,
+        product_retailer_id: retailerId
+      }
+    };
+    return waSend({ messaging_product: 'whatsapp', to, type: 'interactive', interactive });
+  } catch (e) {
+    console.error('sendSingleProduct error', e);
+    return sendText(to, bodyText || 'Browse our catalog');
+  }
+}
+
+// graph helpers imported from ./lib/graph.js
+
+async function showWAProductListForType(to, typeKey) {
+  let retailerIds = [];
+  if (typeKey === 'imported') {
+    if (WA_IMPORTED_RETAILER_IDS.length) retailerIds = WA_IMPORTED_RETAILER_IDS;
+    if (!retailerIds.length) {
+      let setId = WA_SET_IMPORTED_ID;
+      if (!setId) {
+        const sets = await fetchSets();
+        const found = sets.find(s => (s.name || '').toLowerCase() === (WA_SET_IMPORTED_NAME || '').toLowerCase());
+        setId = (found && found.id) || '';
+      }
+      if (setId) retailerIds = await fetchSetItems(setId).catch(() => []);
+    }
+    return sendProductList(to, 'Imported', retailerIds);
+  }
+  if (typeKey === 'indian') {
+    if (WA_INDIAN_RETAILER_IDS.length) retailerIds = WA_INDIAN_RETAILER_IDS;
+    if (!retailerIds.length) {
+      let setId = WA_SET_INDIAN_ID;
+      if (!setId) {
+        const sets = await fetchSets();
+        const found = sets.find(s => (s.name || '').toLowerCase() === (WA_SET_INDIAN_NAME || '').toLowerCase());
+        setId = (found && found.id) || '';
+      }
+      if (setId) retailerIds = await fetchSetItems(setId).catch(() => []);
+    }
+    return sendProductList(to, 'Indian', retailerIds);
+  }
+  return sendText(to, 'No products.');
+}
+
 // --- Firestore init ---
 initDb();
 const adminDb = new Firestore({ projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT });
+// mount admin module routes
+registerAdminRoutes(app, adminDb);
+// mount api module routes
+registerApiRoutes(app, adminDb);
 
 // --- Admin: Sync catalog from Google Sheets ---
 // Usage: GET /admin/sync-catalog-from-sheets?sheetId=...&range=Catalog!A1:Z&mode=dry-run|commit
@@ -130,7 +308,7 @@ app.get('/admin/export-products-csv', async (req, res) => {
       if (s.includes('"') || s.includes(',') || s.includes('\n')) return '"' + s.replaceAll('"', '""') + '"';
       return s;
     }
-    rows.push(['SKU','Title','Type','Price','Currency','MOQ','Hero_URL','Image_Count','All_Images'].join(','));
+    rows.push(['SKU', 'Title', 'Type', 'Price', 'Currency', 'MOQ', 'Hero_URL', 'Image_Count', 'All_Images'].join(','));
     for (const d of snap.docs) {
       const p = d.data() || {};
       const sku = p.sku || d.id;
@@ -155,13 +333,14 @@ app.get('/admin/export-products-csv', async (req, res) => {
   }
 });
 
+
 function nowIso() { return new Date().toISOString(); }
 
 // --- Firestore-backed browse/detail (GCS indexed) ---
 async function getTypes() {
   const doc = await adminDb.collection('config').doc('types').get();
-  const data = doc.exists ? doc.data() : { types: ['indian','imported'] };
-  return Array.isArray(data.types) && data.types.length ? data.types : ['indian','imported'];
+  const data = doc.exists ? doc.data() : { types: ['indian', 'imported'] };
+  return Array.isArray(data.types) && data.types.length ? data.types : ['indian', 'imported'];
 }
 
 const TYPE_DISPLAY_NAMES = {
@@ -220,7 +399,7 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
   try {
     const cart = await dbGetCart(to);
     hasCart = Array.isArray(cart?.items) && cart.items.length > 0;
-  } catch (_) {}
+  } catch (_) { }
   for (const it of slice) {
     try {
       const sku = (it.sku || '').toLowerCase();
@@ -237,7 +416,7 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
           const s2 = await dbGetSession(to);
           s2.last_browse_sku = sku;
           await dbSaveSession(to, s2);
-        } catch (_) {}
+        } catch (_) { }
         // Add per-product quick actions
         const actions = [
           { type: 'reply', reply: { id: `view_${sku}`, title: t(lang, 'BUTTON_VIEW') } },
@@ -249,7 +428,7 @@ async function showProductsPage(to, type, page = 0, pageSize = 3) {
         const body = (it.title || '');
         await sendButtons(to, body, actions);
       }
-    } catch (_) {}
+    } catch (_) { }
   }
   // Build interactive list rows to make selection easier
   const rows = slice.map(it => ({
@@ -359,135 +538,18 @@ async function sendMoreImages(to, sess) {
   }
 }
 
-// --- WhatsApp helpers ---
-function waApiUrl() { return `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`; }
-async function waSend(payload) {
-  const res = await fetch(waApiUrl(), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${WA_TOKEN}`
-    },
-    body: JSON.stringify(payload)
-  });
-  const text = await res.text();
-  if (!res.ok) console.error('WA send error', res.status, text);
-  return { status: res.status, text };
-}
-async function sendText(to, body) {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
-}
-async function sendButtons(to, text, buttons) {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'interactive', interactive: { type: 'button', body: { text }, action: { buttons } } });
-}
-async function sendList(to, bodyText, buttonText, sectionTitle, rows, headerText, footerText) {
-  const interactive = {
-    type: 'list',
-    body: { text: bodyText },
-    action: {
-      button: buttonText || 'Select',
-      sections: [
-        {
-          title: sectionTitle || 'Options',
-          rows
-        }
-      ]
-    }
-  };
-  if (headerText) {
-    interactive.header = { type: 'text', text: headerText };
-  }
-  if (footerText) {
-    interactive.footer = { text: footerText };
-  }
-  return waSend({
-    messaging_product: 'whatsapp',
-    to,
-    type: 'interactive',
-    interactive
-  });
-}
-async function sendImage(to, imageUrl, caption = '') {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'image', image: { link: imageUrl, caption } });
-}
-async function sendImageByMediaId(to, mediaId, caption = '') {
-  return waSend({ messaging_product: 'whatsapp', to, type: 'image', image: { id: mediaId, caption } });
+// WhatsApp helpers imported from ./lib/wa.js
+
+// Share web checkout deep link in chat
+async function sendCheckoutLink(toWaId) {
+  try {
+    const url = buildCheckoutUrl(toWaId);
+    await sendText(toWaId, `Open this link to review items, choose size/qty, enter business details, and place order:\n${url}`);
+  } catch (_) { /* non-fatal */ }
 }
 
 // --- GCS + WhatsApp media upload helpers ---
 const storage = new Storage();
-function normalizeGcsPath(p) {
-  if (!p) return { bucket: '', name: '' };
-  if (p.startsWith('gs://')) {
-    const rest = p.slice('gs://'.length);
-    const firstSlash = rest.indexOf('/');
-    const b = firstSlash === -1 ? rest : rest.slice(0, firstSlash);
-    const name = firstSlash === -1 ? '' : rest.slice(firstSlash + 1);
-    return { bucket: b, name };
-  }
-  // treat as object name under configured bucket/prefix
-  const base = MEDIA_BASE_PREFIX ? `${MEDIA_BASE_PREFIX}/` : '';
-  return { bucket: MEDIA_BUCKET, name: `${base}${p}` };
-}
-
-async function getGcsBytes(gcsPathOrObjectName) {
-  const { bucket, name } = normalizeGcsPath(gcsPathOrObjectName);
-  if (!bucket || !name) throw new Error('Invalid GCS path/object name');
-  const file = storage.bucket(bucket).file(name);
-  const [buf] = await file.download();
-  // try infer mime from extension
-  const lower = name.toLowerCase();
-  const mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-  const filename = name.split('/').pop() || 'image.jpg';
-  return { buf, mime, filename };
-}
-
-function waMediaUploadUrl() {
-  if (!PHONE_NUMBER_ID) throw new Error('WA_PHONE_NUMBER_ID not set');
-  // Cloud API: upload media to the sender phone number's media edge
-  return `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/media`;
-}
-
-async function uploadMediaToWA({ buf, mime, filename }) {
-  // Node 18+: global FormData and Blob are available
-  const form = new FormData();
-  form.append('messaging_product', 'whatsapp');
-  form.append('file', new Blob([buf], { type: mime }), filename);
-  const res = await fetch(waMediaUploadUrl(), {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${WA_TOKEN}` },
-    body: form
-  });
-  let bodyText = '';
-  let json = null;
-  try {
-    bodyText = await res.text();
-    json = JSON.parse(bodyText);
-  } catch (_) {
-    // leave json as null and keep raw text
-  }
-  if (!res.ok) {
-    const errPayload = json || { error_text: bodyText };
-    console.error('WA media upload error', res.status, errPayload);
-    throw new Error(`WA media upload failed: ${res.status} ${JSON.stringify(errPayload)}`);
-  }
-  const mediaId = json && json.id ? json.id : null;
-  if (!mediaId) throw new Error(`WA media upload returned no id: ${bodyText}`);
-  return mediaId; // media_id
-}
-
-// Cache utilities in Firestore
-import { getMediaCache, setMediaCache } from './firestore.js';
-
-async function getOrCreateMediaIdForGcsPath(gcsPathOrObjectName) {
-  const key = gcsPathOrObjectName.startsWith('gs://') ? gcsPathOrObjectName : `${MEDIA_BUCKET}/${MEDIA_BASE_PREFIX ? MEDIA_BASE_PREFIX + '/' : ''}${gcsPathOrObjectName}`;
-  const cached = await getMediaCache(key);
-  if (cached && cached.media_id) return cached.media_id;
-  const payload = await getGcsBytes(gcsPathOrObjectName);
-  const media_id = await uploadMediaToWA(payload);
-  await setMediaCache(key, { media_id, mime: payload.mime, filename: payload.filename, uploaded_at: nowIso() });
-  return media_id;
-}
 
 // --- Admin: public test to send one image by GCS path via media_id cache ---
 app.post('/admin/test-media', async (req, res) => {
@@ -602,7 +664,7 @@ app.post('/admin/reindex-gcs', async (req, res) => {
 
     await batch.commit();
 
-    return res.status(200).json({ ok: true, types, counts: Object.fromEntries(Object.entries(productsByType).map(([k,v]) => [k, v.length])) });
+    return res.status(200).json({ ok: true, types, counts: Object.fromEntries(Object.entries(productsByType).map(([k, v]) => [k, v.length])) });
   } catch (e) {
     console.error('reindex-gcs error', e);
     return res.status(200).json({ ok: false, error: String(e) });
@@ -614,6 +676,7 @@ function verifySignature(req) {
   if (!WA_APP_SECRET) return true; // skip if not set
   const signature = req.get('X-Hub-Signature-256') || '';
   const expected = 'sha256=' + crypto.createHmac('sha256', WA_APP_SECRET).update(req.rawBody || Buffer.from('')).digest('hex');
+  if (signature.length !== expected.length) return false;
   return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }
 
@@ -621,6 +684,27 @@ function verifySignature(req) {
 app.get('/healthz', (req, res) => res.status(200).send('ok'));
 app.get('/health', (req, res) => res.status(200).send('ok'));
 app.get('/', (req, res) => res.status(200).send('ok'));
+
+// --- Static web checkout (Next.js export) ---
+try {
+  const staticDir = path.join(__dirname, 'web', 'out');
+  app.use('/checkout', express.static(staticDir, {
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html')) {
+        // HTML: avoid aggressive caching so clients always get latest build
+        res.setHeader('Cache-Control', 'no-store');
+      } else if (filePath.includes(`${path.sep}_next${path.sep}static${path.sep}`)) {
+        // Next.js hashed assets: safe to cache long-term
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        // Other assets (images, etc.): short/medium cache
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      }
+    }
+  }));
+} catch (e) {
+  console.error('Static /checkout mount failed (non-fatal):', e);
+}
 
 // --- WhatsApp webhook verification ---
 app.get('/webhook/whatsapp', (req, res) => {
@@ -633,7 +717,7 @@ app.get('/webhook/whatsapp', (req, res) => {
   return res.sendStatus(403);
 });
 
-// --- WhatsApp webhook receiver ---
+// --- Webhook receiver ---
 app.post('/webhook/whatsapp', async (req, res) => {
   try {
     if (!verifySignature(req)) return res.sendStatus(401);
@@ -677,7 +761,7 @@ function extractMessageText(m) {
         return it.list_reply.title || it.list_reply.id || '';
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   return '';
 }
@@ -786,6 +870,8 @@ async function handleMessage(waUserId, text, rawMsg) {
           lower = 'lang ml';
         } else if (idLower === 'start') {
           lower = 'start';
+        } else if (idLower === 'native_order') {
+          lower = 'native_order';
         }
       } else if (title) {
         const tLower = title.toLowerCase().trim();
@@ -799,13 +885,31 @@ async function handleMessage(waUserId, text, rawMsg) {
         }
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   if (lower === 'help' || lower === 'type_help') {
     return sendHelp(to, sess);
   }
 
-  if (lower === 'start') {
+  if (lower === 'native order' || lower === 'native_order') {
+    // Fallback capture for native WhatsApp orders
+    // Ensure business info first
+    if (!sess.business_name) {
+      sess.state = 'business_name';
+      await dbSaveSession(waUserId, sess);
+      return sendText(to, 'Please share your business name before placing the order.');
+    }
+    if (!sess.business_address) {
+      sess.state = 'business_address';
+      await dbSaveSession(waUserId, sess);
+      return sendText(to, 'Please share your full business address before placing the order.');
+    }
+    sess.state = 'native_capture';
+    await dbSaveSession(waUserId, sess);
+    return sendText(to, 'Please paste the items and quantities you placed (or attach a screenshot). We will create an order and share the Order ID.');
+  }
+
+  if (lower === 'start' || lower === 'hi' || lower === 'hello') {
     // Reset conversational state and show language gate again
     sess.state = 'lang_select';
     delete sess.language;
@@ -833,10 +937,34 @@ async function handleMessage(waUserId, text, rawMsg) {
     return sendText(to, [header, ...lines, totalLine].join('\n'));
   }
   if (lower === 'checkout') {
-    sess.state = 'business';
+    const cartForCheckout = await dbGetCart(waUserId);
+    const cartItems = cartForCheckout.items || [];
+    if (!cartItems.length) {
+      const msgEmpty = t(lang, 'CART_EMPTY');
+      return sendText(to, msgEmpty);
+    }
+    if (!sess.business_name) {
+      sess.state = 'business_name';
+      await dbSaveSession(waUserId, sess);
+      return sendText(to, 'Please share your business name before placing the order.');
+    }
+    if (!sess.business_address) {
+      sess.state = 'business_address';
+      await dbSaveSession(waUserId, sess);
+      return sendText(to, 'Please share your full business address before placing the order.');
+    }
+    // Build confirm prompt
+    sess.business = { name: sess.business_name, address: sess.business_address };
+    sess.state = 'confirm';
     await dbSaveSession(waUserId, sess);
-    const msg = t(lang, 'BUSINESS_PROMPT');
-    return sendText(to, msg);
+    const totalC = cartItems.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    const bodyC = t(lang, 'CONFIRM_BODY', { name: sess.business_name, total: totalC });
+    const yesTitleC = t(lang, 'BUTTON_CONFIRM');
+    const noTitleC = t(lang, 'BUTTON_CANCEL');
+    return sendButtons(to, bodyC, [
+      { type: 'reply', reply: { id: 'confirm_yes', title: yesTitleC } },
+      { type: 'reply', reply: { id: 'confirm_no', title: noTitleC } }
+    ]);
   }
 
   if (lower === 'view' || lower === 'add to cart' || lower === 'add') {
@@ -922,9 +1050,11 @@ async function handleMessage(waUserId, text, rawMsg) {
   if (sess.state === 'ask_mode') {
     if (lower.includes('wholesale') || lower.includes('mode_wholesale')) {
       sess.mode = 'wholesale';
-      sess.state = 'types';
+      // Share deep link to web checkout and stop legacy browse flow
+      try { await sendCheckoutLink(waUserId); } catch (_) {}
+      sess.state = 'web_checkout';
       await dbSaveSession(waUserId, sess);
-      return showTypes(to, sess);
+      return;
     }
     if (lower.includes('retail') || lower.includes('mode_retail')) {
       // B2B gate: we serve wholesale only. Confirm buyer is B2B.
@@ -957,9 +1087,11 @@ async function handleMessage(waUserId, text, rawMsg) {
 
     if (isYes) {
       sess.mode = 'wholesale';
-      sess.state = 'types';
+      // Share deep link to web checkout when B2B is confirmed and stop legacy browse flow
+      try { await sendCheckoutLink(waUserId); } catch (_) {}
+      sess.state = 'web_checkout';
       await dbSaveSession(waUserId, sess);
-      return showTypes(to, sess);
+      return;
     }
     if (isNo) {
       sess.state = 'start';
@@ -979,6 +1111,29 @@ async function handleMessage(waUserId, text, rawMsg) {
     ]);
   }
 
+  // Collect business name/address states
+  if (sess.state === 'business_name') {
+    const name = (text || '').trim();
+    if (!name) {
+      return sendText(to, 'Please enter your business name to continue.');
+    }
+    sess.business_name = name;
+    sess.state = 'business_address';
+    await dbSaveSession(waUserId, sess);
+    return sendText(to, 'Please enter your full business address (including city and pincode).');
+  }
+  if (sess.state === 'business_address') {
+    const addr = (text || '').trim();
+    if (!addr) {
+      return sendText(to, 'Please enter your full business address to continue.');
+    }
+    sess.business_address = addr;
+    // proceed to types
+    sess.state = 'types';
+    await dbSaveSession(waUserId, sess);
+    return showTypes(to, sess);
+  }
+
   // Choose type (indian/imported)
   if (sess.state === 'types') {
     if (lower.includes('indian') || lower === 'indian') {
@@ -986,6 +1141,9 @@ async function handleMessage(waUserId, text, rawMsg) {
       sess.page = 0;
       sess.state = 'browse';
       await dbSaveSession(waUserId, sess);
+      if (USE_WA_CATALOG && WA_CATALOG_ID) {
+        return showWAProductListForType(to, 'indian');
+      }
       return showProductsPage(to, sess.type, sess.page);
     }
     if (lower.includes('imported') || lower === 'imported') {
@@ -993,6 +1151,9 @@ async function handleMessage(waUserId, text, rawMsg) {
       sess.page = 0;
       sess.state = 'browse';
       await dbSaveSession(waUserId, sess);
+      if (USE_WA_CATALOG && WA_CATALOG_ID) {
+        return showWAProductListForType(to, 'imported');
+      }
       return showProductsPage(to, sess.type, sess.page);
     }
     // re-show types on any other input
@@ -1119,10 +1280,37 @@ async function handleMessage(waUserId, text, rawMsg) {
       return sendText(to, [header, ...lines, totalLine].join('\n'));
     }
     if (lower === 'checkout') {
-      sess.state = 'business';
+      const cartForCheckout2 = await dbGetCart(waUserId);
+      const cartItems2 = cartForCheckout2.items || [];
+      if (!cartItems2.length) {
+        const msgEmpty2 = t(lang, 'CART_EMPTY');
+        return sendText(to, msgEmpty2);
+      }
+      if (!sess.business_name) {
+        sess.state = 'business_name';
+        await dbSaveSession(waUserId, sess);
+        return sendText(to, 'Please share your business name before placing the order.');
+      }
+      if (!sess.business_address) {
+        sess.state = 'business_address';
+        await dbSaveSession(waUserId, sess);
+        return sendText(to, 'Please share your full business address before placing the order.');
+      }
+      sess.business = { name: sess.business_name, address: sess.business_address };
+      sess.state = 'confirm';
       await dbSaveSession(waUserId, sess);
-      const msg = t(lang, 'BUSINESS_PROMPT');
-      return sendText(to, msg);
+      const totalC2 = cartItems2.reduce((s, i) => s + i.qty * i.unit_price, 0);
+      const bodyC2 = t(lang, 'CONFIRM_BODY', { name: sess.business_name, total: totalC2 });
+      const yesTitleC2 = t(lang, 'BUTTON_CONFIRM');
+      const noTitleC2 = t(lang, 'BUTTON_CANCEL');
+      return sendButtons(to, bodyC2, [
+        { type: 'reply', reply: { id: 'confirm_yes', title: yesTitleC2 } },
+        { type: 'reply', reply: { id: 'confirm_no', title: noTitleC2 } }
+      ]);
+    }
+    if (USE_WA_CATALOG && WA_CATALOG_ID) {
+      // Do not spam legacy text-help when using native WhatsApp catalog UI
+      return;
     }
     const msgBrowse = t(lang, 'BROWSE_INLINE_HELP');
     return sendText(to, msgBrowse);
@@ -1259,32 +1447,14 @@ async function handleMessage(waUserId, text, rawMsg) {
   }
 
   if (sess.state === 'confirm') {
-    const kw = YES_NO_KEYWORDS[lang] || YES_NO_KEYWORDS.en;
-    const yesWords = kw.yes || YES_NO_KEYWORDS.en.yes;
-    const noWords = kw.no || YES_NO_KEYWORDS.en.no;
+    // Legacy chat-based confirmation is deprecated; orders are placed via web checkout only.
+    const info = 'To place or confirm your order, please use the latest checkout link we sent above.';
+    return sendText(to, info);
+  }
 
-    const isYes =
-      lower.includes('confirm_yes') ||
-      yesWords.some(w => lower === w || lower.includes(w));
-    const isNo =
-      lower.includes('confirm_no') ||
-      noWords.some(w => lower === w || lower.includes(w));
-
-    if (isYes) {
-      const order = await createOrder(waUserId, sess);
-      await dbSaveSession(waUserId, { state: 'start', mode: null, language: (sess && (sess.language || sess.locale)) || 'en' });
-      await dbClearCart(waUserId);
-      const msg = t(lang, 'CONFIRM_ORDER_PLACED', { id: order.id });
-      await sendText(to, msg);
-      return;
-    }
-    if (isNo) {
-      await dbSaveSession(waUserId, { state: 'start', mode: null, language: (sess && (sess.language || sess.locale)) || 'en' });
-      const msg = t(lang, 'CONFIRM_ORDER_CANCELLED');
-      return sendText(to, msg);
-    }
-    const msg = t(lang, 'CONFIRM_CHOOSE_ACTION');
-    return sendText(to, msg);
+  // Handle native WhatsApp order message
+  if (rawMsg && rawMsg.type === 'order') {
+    return handleNativeOrder(waUserId, rawMsg);
   }
 
   // fallback
@@ -1294,17 +1464,55 @@ async function handleMessage(waUserId, text, rawMsg) {
   }
 }
 
+async function handleNativeOrder(waUserId, rawMsg) {
+  const orderDetails = rawMsg.order;
+  const products = orderDetails.product_items || [];
+
+  if (!products.length) {
+    return sendText(waUserId, "We received an empty order. Please try again.");
+  }
+
+  // Reconstruct items with details from our DB to ensure valid prices/titles
+  const items = [];
+  let subtotal = 0;
+  let currency = 'INR';
+
+  for (const p of products) {
+    const skuRaw = p.product_retailer_id || '';
+    const sku = skuRaw.toUpperCase(); // normalize
+    const qty = Number(p.quantity) || 1;
+
+    // Try to fetch fresh details
+    let unit_price = Number(p.item_price) || 0;
+    let cur = (p.currency || 'INR').toUpperCase();
+
+    const doc = await getProductDoc(skuRaw.toLowerCase());
+    if (doc) {
+      if (doc.price) unit_price = Number(doc.price);
+      if (doc.currency) cur = doc.currency.toUpperCase();
+    }
+
+    items.push({
+      sku,
+      qty,
+      unit_price,
+      currency: cur
+    });
+
+    subtotal += (qty * unit_price);
+    currency = cur; // assume all same currency
+  }
+
+  // Legacy chat-native order creation is deprecated; web checkout is now the only order mechanism.
+  const info = 'Ordering directly by message is no longer supported. Please use the checkout link we sent to review items and place your order.';
+  await sendText(waUserId, info);
+}
+
 async function showCatalog(to) {
-  let items = await listCatalog(3);
+  const items = await listCatalog(3);
   if (!items || items.length === 0) {
-    // seed demo items into Firestore once
-    const seed = [
-      { sku: 'TSHIRT-1001', title: 'Classic Cotton Tee', price: 249, currency: 'INR', moq: 10, image_url: 'https://picsum.photos/seed/t1/512/512', active: true, updated_at: nowIso() },
-      { sku: 'KURTI-2001', title: 'Elegant Kurti', price: 699, currency: 'INR', moq: 5, image_url: 'https://picsum.photos/seed/k1/512/512', active: true, updated_at: nowIso() },
-      { sku: 'JACKET-3001', title: 'Imported Jacket', price: 2499, currency: 'INR', moq: 2, image_url: 'https://picsum.photos/seed/j1/512/512', active: true, updated_at: nowIso() }
-    ];
-    await upsertCatalogItems(seed);
-    items = await listCatalog(3);
+    await sendText(to, t('en', 'CATALOG_FOOTER'));
+    return;
   }
   for (const p of items) {
     const caption = t('en', 'CATALOG_IMAGE_CAPTION', {
@@ -1319,38 +1527,7 @@ async function showCatalog(to) {
   await sendText(to, t('en', 'CATALOG_FOOTER'));
 }
 
-// --- Order creation & Sheet logging ---
-async function createOrder(waUserId, sess) {
-  const id = 'ORD-' + Math.random().toString(36).slice(2, 10).toUpperCase();
-  const order = {
-    id,
-    wa_user_id: waUserId,
-    business: sess.business || {},
-    // Pull items from persisted cart to ensure consistency
-    items: (await dbGetCart(waUserId)).items || [],
-    currency: ((await dbGetCart(waUserId)).items?.[0] && (await dbGetCart(waUserId)).items[0].currency) || 'INR',
-    subtotal: ((await dbGetCart(waUserId)).items || []).reduce((s, i) => s + i.qty * i.unit_price, 0),
-    created_at: nowIso()
-  };
-  // Persist to Firestore
-  try { await createOrderDoc(order); } catch (e) { console.error('createOrderDoc error', e); }
-  // Attempt to append to Google Sheet if configured
-  try { await appendOrderToSheet(order); } catch (e) { console.error('appendOrderToSheet error', e); }
-  return order;
-}
-
-async function appendOrderToSheet(order) {
-  if (!SALES_SHEET_ID) return;
-  const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
-  const sheets = google.sheets({ version: 'v4', auth });
-  const row = [ order.created_at, order.id, order.wa_user_id, order.business.name || '', JSON.stringify(order.items), order.subtotal, order.currency, 'placed' ];
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SALES_SHEET_ID,
-    range: 'Orders!A1',
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [row] }
-  });
-}
+// (Order creation & Sheet logging now live in routes/api.js for web checkout.)
 
 // --- Catalog sync endpoint ---
 app.post('/sync-catalog', async (req, res) => {
@@ -1378,16 +1555,16 @@ function validateRows(rows) {
   const seen = new Set();
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || {};
-    const ctx = `row ${i+1}`;
+    const ctx = `row ${i + 1}`;
     const sku = (r.sku || '').toString().trim().toUpperCase();
-    if (!sku) { errors.push({ row: i+1, field: 'sku', error: 'required' }); continue; }
-    if (seen.has(sku)) { errors.push({ row: i+1, field: 'sku', error: 'duplicate in request' }); continue; }
+    if (!sku) { errors.push({ row: i + 1, field: 'sku', error: 'required' }); continue; }
+    if (seen.has(sku)) { errors.push({ row: i + 1, field: 'sku', error: 'duplicate in request' }); continue; }
     seen.add(sku);
     const price = Number(r.price);
-    if (!Number.isFinite(price) || price <= 0) { errors.push({ row: i+1, field: 'price', error: 'invalid' }); continue; }
+    if (!Number.isFinite(price) || price <= 0) { errors.push({ row: i + 1, field: 'price', error: 'invalid' }); continue; }
     const currency = (r.currency || 'INR').toString().trim().toUpperCase();
     const moq = parseInt(r.moq || '1', 10);
-    if (!Number.isInteger(moq) || moq <= 0) { errors.push({ row: i+1, field: 'moq', error: 'invalid' }); continue; }
+    if (!Number.isInteger(moq) || moq <= 0) { errors.push({ row: i + 1, field: 'moq', error: 'invalid' }); continue; }
     const image_url = (r.image_url || r.imageUrl || '').toString().trim();
     // image_url is optional in the new flow; products images come from GCS indexer
     const title = (r.title || '').toString().trim();
