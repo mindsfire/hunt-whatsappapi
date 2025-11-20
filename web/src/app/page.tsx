@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useMemo, useState } from "react";
+import ProductCard, { Product as CardProduct } from "./components/ProductCard";
 
 function useQuery() {
   const [query, setQuery] = useState<Record<string, string>>({});
@@ -20,6 +21,7 @@ type CartItem = {
   image_url?: string;
   size?: string;
   qty?: number;
+  sizes?: string[];
 };
 
 type Product = {
@@ -29,6 +31,7 @@ type Product = {
   currency: string;
   image_url?: string;
   description?: string;
+  sizes?: string[];
 };
 
 export default function Page() {
@@ -142,16 +145,18 @@ export default function Page() {
     setSizeErrors((errs) => errs.filter((i) => i !== idx));
   };
 
-  const onAddProduct = (p: Product) => {
+  const onAddProductSized = (p: Product, size: string, qty: number) => {
+    if (!size) return;
+    const addQty = qty > 0 ? qty : 1;
     setItems((arr) => {
-      const idx = arr.findIndex((x) => x.content_id === p.content_id);
+      const idx = arr.findIndex((x) => x.content_id === p.content_id && x.size === size);
       if (idx >= 0) {
         const copy = [...arr];
         const cur = copy[idx];
-        copy[idx] = { ...cur, qty: (cur.qty || 1) + 1 };
+        copy[idx] = { ...cur, qty: (cur.qty || 1) + addQty };
         return copy;
       }
-      return [...arr, { ...p, qty: 1 } as CartItem];
+      return [...arr, { ...p, size, qty: addQty } as CartItem];
     });
     setToast("Added to cart");
   };
@@ -272,52 +277,19 @@ export default function Page() {
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
                 {prods.map((p) => (
-                  <div key={p.content_id} style={{ border: "1px solid #333", borderRadius: 8, padding: 12 }}>
-                    {p.image_url ? (
-                      <img src={p.image_url} alt={p.title} style={{ width: "100%", height: 140, objectFit: "cover", borderRadius: 6, marginBottom: 8 }} />
-                    ) : (
-                      <div style={{ width: "100%", height: 140, background: "#222", borderRadius: 6, marginBottom: 8 }} />
-                    )}
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{p.title}</div>
-                    {p.description && (
-                      <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6, maxHeight: 48, overflow: 'hidden' }}>
-                        {p.description}
-                      </div>
-                    )}
-                    <div style={{ opacity: 0.8, fontSize: 14, marginBottom: 8 }}>{formatCurrency(p.currency)} {p.price}</div>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button
-                        onClick={() => onAddProduct(p)}
-                        style={{
-                          padding: "10px 18px",
-                          background: "#2563eb",
-                          color: "white",
-                          border: 0,
-                          borderRadius: 6,
-                          cursor: "pointer",
-                          fontSize: 15,
-                          fontWeight: 600,
-                        }}
-                      >
-                        Add
-                      </button>
-                      <button
-                        onClick={() => openGallery(p.content_id)}
-                        style={{
-                          padding: "10px 18px",
-                          background: "#374151",
-                          color: "white",
-                          border: 0,
-                          borderRadius: 6,
-                          cursor: "pointer",
-                          fontSize: 15,
-                          fontWeight: 500,
-                        }}
-                      >
-                        View Images
-                      </button>
-                    </div>
-                  </div>
+                  <ProductCard
+                    key={p.content_id}
+                    product={p as CardProduct}
+                    formatCurrency={formatCurrency}
+                    onAddToCart={onAddProductSized}
+                    onViewImages={openGallery}
+                    onGoToCart={() => {
+                      try {
+                        const el = document.getElementById("cart");
+                        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                      } catch (_) {}
+                    }}
+                  />
                 ))}
               </div>
             )}
@@ -330,7 +302,7 @@ export default function Page() {
             )}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 8, paddingRight: 8 }}>
+          <div id="cart" style={{ display: "flex", flexDirection: "column", gap: 12, paddingLeft: 8, paddingRight: 8 }}>
             {items.map((it, i) => (
               <div key={it.content_id + ':' + i} style={{ display: "flex", gap: 12, border: "1px solid #333", borderRadius: 8, padding: 12 }}>
                 {it.image_url ? (
@@ -372,11 +344,9 @@ export default function Page() {
                         }}
                       >
                         <option value="">Select size</option>
-                        <option>S</option>
-                        <option>M</option>
-                        <option>L</option>
-                        <option>XL</option>
-                        <option>2XL</option>
+                        {((it.sizes && it.sizes.length) ? it.sizes : ["S", "M", "L", "XL", "2XL"]).map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
                       </select>
                       <div
                         style={{

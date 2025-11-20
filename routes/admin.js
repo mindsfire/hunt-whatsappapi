@@ -15,6 +15,28 @@ const WA_SET_INDIAN_NAME = process.env.WA_SET_INDIAN_NAME || 'Indian brands';
 
 function nowIso() { return new Date().toISOString(); }
 
+function parseDescriptionAndSizes(descRaw) {
+  const desc = (descRaw || '').toString();
+
+  // Try to find patterns like:
+  //  "Available in sizes: M, L, XL, 2XL" or "Sizes: M,L,XL,2XL"
+  const m = desc.match(/available in sizes\s*:?\s*([A-Za-z0-9,\s]+)/i) ||
+            desc.match(/sizes\s*:?\s*([A-Za-z0-9,\s]+)/i);
+
+  if (!m) return { description: desc, sizes: [] };
+
+  const sizesPart = m[1] || '';
+  const sizes = sizesPart
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Remove the matched "sizes" segment from the description for cleaner display
+  const cleanDesc = desc.replace(m[0], '').replace(/\s*\|\s*$/, '').trim();
+
+  return { description: cleanDesc, sizes };
+}
+
 export function registerAdminRoutes(app, adminDb) {
   // --- Admin: Sync products from Commerce Manager (Catalog) into Firestore ---
   // Usage: GET /admin/sync-from-cm
@@ -58,11 +80,13 @@ export function registerAdminRoutes(app, adminDb) {
           if (!sku) continue;
           const images = [p.image_url, ...(Array.isArray(p.additional_image_urls) ? p.additional_image_urls : [])].filter(Boolean);
           const heroIdx = 0;
+          const parsed = parseDescriptionAndSizes(p.description);
           const prodDoc = {
             sku,
             type: typeKey,
             title: p.name || sku.toUpperCase(),
-            description: (p.description || '').toString(),
+            description: parsed.description,
+            sizes: parsed.sizes,
             price: Number(p.price || 0) || 0,
             currency: (p.currency || 'INR').toUpperCase(),
             images,

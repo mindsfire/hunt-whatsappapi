@@ -68,7 +68,8 @@ export function registerApiRoutes(app, adminDb) {
           const price = Number(pd.price || ci.unit_price || 0) || 0;
           const currency = (pd.currency || 'INR').toString();
           const title = pd.title || sku.toUpperCase();
-          items.push({ content_id: sku, title, price, currency, image_url, qty: Number(ci.qty || 1) });
+          const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
+          items.push({ content_id: sku, title, price, currency, image_url, sizes, qty: Number(ci.qty || 1) });
         }
       } catch (_) {}
 
@@ -166,7 +167,8 @@ export function registerApiRoutes(app, adminDb) {
         const currency = (pd.currency || 'INR').toString();
         const title = pd.title || (it.title || sku.toUpperCase());
         const description = (pd.description || '').toString();
-        items.push({ content_id: sku, title, price, currency, image_url, description });
+        const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
+        items.push({ content_id: sku, title, price, currency, image_url, description, sizes });
       }
 
       return res.status(200).json({ ok: true, type, page: p, pageSize, total, pageCount, items });
@@ -190,6 +192,7 @@ export function registerApiRoutes(app, adminDb) {
       if (!pd) return res.status(404).json({ ok: false, error: 'not found' });
       const images = Array.isArray(pd.images) ? pd.images : [];
       const hero_image_index = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
+      const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
       return res.status(200).json({
         ok: true,
         content_id: id,
@@ -198,7 +201,8 @@ export function registerApiRoutes(app, adminDb) {
         currency: (pd.currency || 'INR').toString(),
         description: (pd.description || '').toString(),
         images,
-        hero_image_index
+        hero_image_index,
+        sizes
       });
     } catch (e) {
       console.error('GET /api/product error', e);
