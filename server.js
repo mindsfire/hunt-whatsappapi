@@ -544,7 +544,14 @@ async function sendMoreImages(to, sess) {
 async function sendCheckoutLink(toWaId) {
   try {
     const url = await buildCheckoutUrl(toWaId);
-    await sendText(toWaId, `Open this link to review items, choose size/qty, enter business details, and place order:\n${url}`);
+    // Look up session to determine the preferred language for this user.
+    let lang = 'en';
+    try {
+      const sess = await dbGetSession(toWaId);
+      if (sess && (sess.language || sess.locale)) lang = sess.language || sess.locale;
+    } catch (_) { /* ignore, fallback to en */ }
+    const intro = t(lang, 'CHECKOUT_LINK_INTRO');
+    await sendText(toWaId, `${intro}\n${url}`);
   } catch (_) { /* non-fatal */ }
 }
 
@@ -909,16 +916,55 @@ async function handleMessage(waUserId, text, rawMsg) {
   }
 
   if (lower === 'start' || lower === 'hi' || lower === 'hello') {
-    // Reset conversational state and show language gate again
-    sess.state = 'lang_select';
-    delete sess.language;
+    // Reset conversational state. If language is not chosen yet, show language gate.
     delete sess.mode;
     delete sess.type;
     delete sess.page;
     delete sess.selected_product;
     delete sess.images_offset;
+
+    if (!sess.language) {
+      sess.state = 'lang_select';
+      await dbSaveSession(waUserId, sess);
+      return sendLanguageSelector(to);
+    }
+
+    // If user is already in web checkout, resend a fresh deep link using restart copy.
+    if (sess.state === 'web_checkout') {
+      try {
+        const l = sess.language || lang || 'en';
+        const url = await buildCheckoutUrl(waUserId);
+        const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
+        const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
+        const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
+        const msg = `${header}\n${body}\n${footer}`;
+        await sendText(to, msg);
+        // Stay in web_checkout state so future messages are treated as part of checkout.
+        return;
+      } catch (_) {
+        // Fallback to generic checkout link behavior if something fails.
+        try { await sendCheckoutLink(waUserId); } catch (_) {}
+        sess.state = 'web_checkout';
+        await dbSaveSession(waUserId, sess);
+        return;
+      }
+    }
+
+    // If language is already set and not in web_checkout, restart flow in the same language
+    // using the wholesale greeting (header/body/footer) plus Wholesale/Retail buttons.
+    sess.state = 'ask_mode';
     await dbSaveSession(waUserId, sess);
-    return sendLanguageSelector(to);
+    const l = sess.language;
+    const headerRestart = t(l, 'WHOLESALE_GREETING_HEADER');
+    const bodyRestart = t(l, 'WHOLESALE_GREETING_BODY');
+    const footerRestart = t(l, 'WHOLESALE_GREETING_FOOTER');
+    const fullBodyRestart = `*${headerRestart}*\n\n${bodyRestart}\n\n_${footerRestart}_`;
+    const wholesaleTitle = t(l, 'BUTTON_MODE_WHOLESALE');
+    const retailTitle = t(l, 'BUTTON_MODE_RETAIL');
+    return sendButtons(to, fullBodyRestart, [
+      { type: 'reply', reply: { id: 'mode_wholesale', title: wholesaleTitle } },
+      { type: 'reply', reply: { id: 'mode_retail', title: retailTitle } }
+    ]);
   }
 
   // Global cart view / checkout shortcuts (work from any state)
@@ -966,6 +1012,17 @@ async function handleMessage(waUserId, text, rawMsg) {
     ]);
   }
 
+  // When user is already in web checkout mode and sends any message (other than 'start',
+  // which is handled above), respond with a friendly, session-aware explanation
+  // formatted as Header (bold), Body, Footer (italic) instead of restarting flow.
+  if (sess.state === 'web_checkout') {
+    const headerW = t(lang, 'WEB_CHECKOUT_SESSION_HEADER');
+    const bodyW = t(lang, 'WEB_CHECKOUT_SESSION_INFO');
+    const footerW = t(lang, 'WEB_CHECKOUT_SESSION_FOOTER');
+    const msgW = `*${headerW}*\n\n${bodyW}\n\n_${footerW}_`;
+    return sendText(to, msgW);
+  }
+
   if (lower === 'view' || lower === 'add to cart' || lower === 'add') {
     const prefSku = (sess.selected_product && sess.selected_product.trim()) || (sess.last_browse_sku && sess.last_browse_sku.trim()) || '';
     if (prefSku) {
@@ -999,10 +1056,13 @@ async function handleMessage(waUserId, text, rawMsg) {
     }
     sess.state = 'ask_mode';
     await dbSaveSession(waUserId, sess);
-    const body = t(lang, 'ASK_MODE_PROMPT');
+    const headerStart = t(lang, 'WHOLESALE_GREETING_HEADER');
+    const bodyStart = t(lang, 'WHOLESALE_GREETING_BODY');
+    const footerStart = t(lang, 'WHOLESALE_GREETING_FOOTER');
+    const fullBodyStart = `*${headerStart}*\n\n${bodyStart}\n\n_${footerStart}_`;
     const wholesaleTitle = t(lang, 'BUTTON_MODE_WHOLESALE');
     const retailTitle = t(lang, 'BUTTON_MODE_RETAIL');
-    return sendButtons(to, body, [
+    return sendButtons(to, fullBodyStart, [
       { type: 'reply', reply: { id: 'mode_wholesale', title: wholesaleTitle } },
       { type: 'reply', reply: { id: 'mode_retail', title: retailTitle } }
     ]);
@@ -1015,7 +1075,11 @@ async function handleMessage(waUserId, text, rawMsg) {
       sess.language = 'en';
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
-      return sendButtons(to, t('en', 'ASK_MODE_PROMPT'), [
+      const headerEn = t('en', 'WHOLESALE_GREETING_HEADER');
+      const bodyEn = t('en', 'WHOLESALE_GREETING_BODY');
+      const footerEn = t('en', 'WHOLESALE_GREETING_FOOTER');
+      const fullBodyEn = `*${headerEn}*\n\n${bodyEn}\n\n_${footerEn}_`;
+      return sendButtons(to, fullBodyEn, [
         { type: 'reply', reply: { id: 'mode_wholesale', title: t('en', 'BUTTON_MODE_WHOLESALE') } },
         { type: 'reply', reply: { id: 'mode_retail', title: t('en', 'BUTTON_MODE_RETAIL') } }
       ]);
@@ -1036,7 +1100,11 @@ async function handleMessage(waUserId, text, rawMsg) {
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
       const l = sess.language;
-      return sendButtons(to, t(l, 'ASK_MODE_PROMPT'), [
+      const header = t(l, 'WHOLESALE_GREETING_HEADER');
+      const body = t(l, 'WHOLESALE_GREETING_BODY');
+      const footer = t(l, 'WHOLESALE_GREETING_FOOTER');
+      const fullBody = `*${header}*\n\n${body}\n\n_${footer}_`;
+      return sendButtons(to, fullBody, [
         { type: 'reply', reply: { id: 'mode_wholesale', title: t(l, 'BUTTON_MODE_WHOLESALE') } },
         { type: 'reply', reply: { id: 'mode_retail', title: t(l, 'BUTTON_MODE_RETAIL') } }
       ]);
@@ -1068,7 +1136,17 @@ async function handleMessage(waUserId, text, rawMsg) {
         { type: 'reply', reply: { id: 'b2b_no', title: noTitle } }
       ]);
     }
-    return sendText(to, t(lang, 'ASK_MODE_CHOOSE'));
+    // Any other input here: gently force the user back to choosing Wholesale or Retail
+    // by resending the choice with buttons instead of plain text, with formatted header/options.
+    const headerChoose = t(lang, 'ASK_MODE_CHOOSE');
+    const optionsChoose = t(lang, 'ASK_MODE_OPTIONS');
+    const body = `*${headerChoose}*\n\n_${optionsChoose}_`;
+    const wholesaleTitle = t(lang, 'BUTTON_MODE_WHOLESALE');
+    const retailTitle = t(lang, 'BUTTON_MODE_RETAIL');
+    return sendButtons(to, body, [
+      { type: 'reply', reply: { id: 'mode_wholesale', title: wholesaleTitle } },
+      { type: 'reply', reply: { id: 'mode_retail', title: retailTitle } }
+    ]);
   }
 
   // B2B gate confirmation
@@ -1079,6 +1157,9 @@ async function handleMessage(waUserId, text, rawMsg) {
 
     const isYes =
       lower.includes('b2b_yes') ||
+      // If the user types or taps Wholesale again here, treat it as a YES.
+      lower.includes('mode_wholesale') ||
+      lower.includes('wholesale') ||
       yesWords.some(w => lower === w || lower.includes(w));
     const isNo =
       lower.includes('b2b_no') ||
