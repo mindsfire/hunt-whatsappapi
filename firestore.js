@@ -56,6 +56,32 @@ export async function createOrderDoc(order) {
   await ref.set(order);
 }
 
+// --- Checkout tokens ---
+// Stored separately from sessions to avoid races with session state machine.
+// Doc ID is the token string.
+export async function createCheckoutTokenDoc(token, waId, expiresAt) {
+  const ref = col('checkout_tokens').doc(token);
+  await ref.set({
+    token,
+    wa_id: waId,
+    expires_at: expiresAt,
+    used_at: null,
+    created_at: new Date().toISOString()
+  });
+}
+
+export async function getCheckoutTokenDoc(token) {
+  const doc = await col('checkout_tokens').doc(token).get();
+  return doc.exists ? doc.data() : null;
+}
+
+export async function markCheckoutTokenUsed(token) {
+  try {
+    const ref = col('checkout_tokens').doc(token);
+    await ref.set({ used_at: new Date().toISOString() }, { merge: true });
+  } catch (_) { }
+}
+
 // --- WhatsApp media cache ---
 // key: hash or path string (we will use the full GCS path as key)
 export async function getMediaCache(key) {

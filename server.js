@@ -543,7 +543,7 @@ async function sendMoreImages(to, sess) {
 // Share web checkout deep link in chat
 async function sendCheckoutLink(toWaId) {
   try {
-    const url = buildCheckoutUrl(toWaId);
+    const url = await buildCheckoutUrl(toWaId);
     await sendText(toWaId, `Open this link to review items, choose size/qty, enter business details, and place order:\n${url}`);
   } catch (_) { /* non-fatal */ }
 }
