@@ -1064,8 +1064,8 @@ async function handleMessage(waUserId, text, rawMsg) {
       const noTitle = t(lang, 'BUTTON_B2B_NO');
       const yesTitle = t(lang, 'BUTTON_B2B_YES');
       return sendButtons(to, body, [
-        { type: 'reply', reply: { id: 'b2b_no', title: noTitle } },
-        { type: 'reply', reply: { id: 'b2b_yes', title: yesTitle } }
+        { type: 'reply', reply: { id: 'b2b_yes', title: yesTitle } },
+        { type: 'reply', reply: { id: 'b2b_no', title: noTitle } }
       ]);
     }
     return sendText(to, t(lang, 'ASK_MODE_CHOOSE'));
