@@ -40,9 +40,6 @@ https://localhost:3000/checkout/?u=dev&t=dev
 
 #build locally
 npm --prefix web run build
-#stop locally
-lsof -iTCP:8080 -sTCP:LISTEN -n -P
-kill -9 15956 
-#run locally
+kill -9 $(lsof -ti tcp:8080)
 node server.js
-http://localhost:8080/checkout/?u=dev&t=dev
+open "http://localhost:8080/checkout/?u=dev&t=dev"

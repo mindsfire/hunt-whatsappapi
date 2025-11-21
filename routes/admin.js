@@ -39,7 +39,10 @@ function parseDescriptionAndSizes(descRaw) {
 
   // Parse pcs per set from patterns like "8 Pcs set" / "8 pcs set"
   let pcsPerSet = 0;
-  const pcsMatch = desc.match(/(\d+)\s*(pcs?|pieces?)\s*set/i);
+  // Support variants like:
+  //  "8 Pcs set", "8 pcs", "8pc set", "8pcs", "8 pieces set"
+  //  with or without space before/after the unit and optional "set" word.
+  const pcsMatch = desc.match(/(\d+)\s*(pc|pcs?|pieces?)\b(?:\s*set)?/i);
   if (pcsMatch) {
     const n = parseInt(pcsMatch[1], 10);
     if (Number.isFinite(n) && n > 0) pcsPerSet = n;

@@ -47,6 +47,7 @@ export default function Page() {
   const [bizAddr, setBizAddr] = useState("");
   const [gstin, setGstin] = useState("");
   const [bizError, setBizError] = useState(false);
+  const [gstError, setGstError] = useState<string | null>(null);
   const [sizeErrors, setSizeErrors] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [placing, setPlacing] = useState(false);
@@ -67,10 +68,14 @@ export default function Page() {
 
   // Toast notification state
   const [toast, setToast] = useState<string | null>(null);
+  const [toastError, setToastError] = useState(false);
 
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(() => setToast(null), 2000);
+    const id = setTimeout(() => {
+      setToast(null);
+      setToastError(false);
+    }, 2000);
     return () => clearTimeout(id);
   }, [toast]);
 
@@ -147,7 +152,7 @@ export default function Page() {
     return items.reduce((s, it) => {
       const qtySets = it.qty || 0;
       const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
-      const pricePerPiece = it.price || 0;
+      const pricePerPiece = it.price || 0; // Catalog price is treated as per piece
       return s + qtySets * pcsPerSet * pricePerPiece;
     }, 0);
   }, [items]);
@@ -179,6 +184,7 @@ export default function Page() {
       }
       return [...arr, { ...p, size, qty: addQty } as CartItem];
     });
+    setToastError(false);
     setToast("Added to cart");
   };
 
@@ -188,7 +194,12 @@ export default function Page() {
   };
 
   const placeOrder = async () => {
-    if (!items.length || placing) return;
+    if (placing) return;
+    if (!items.length) {
+      setToastError(true);
+      setToast("Add at least one item to your cart before placing order.");
+      return;
+    }
     // Validate that all items have a size selected
     const missingSizeIdxs = items.map((it, idx) => (!it.size ? idx : -1)).filter((i) => i >= 0);
     if (missingSizeIdxs.length) {
@@ -199,9 +210,22 @@ export default function Page() {
     const address = bizAddr.trim();
     const gst = gstin.trim();
     setBizError(false);
-    if (!name || !address) {
+    setGstError(null);
+
+    // Business name: allow only letters and spaces
+    const nameValid = !!name && /^[A-Za-z\s]+$/.test(name);
+    if (!nameValid || !address) {
       setBizError(true);
       return;
+    }
+
+    // GSTIN: optional, but if provided must be a valid 15-character uppercase GST number
+    if (gst) {
+      const gstPattern = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[A-Z0-9]{1}Z[A-Z0-9]{1}$/;
+      if (!gstPattern.test(gst)) {
+        setGstError("Enter a valid 15-character GSTIN in UPPERCASE without spaces or special characters.");
+        return;
+      }
     }
     try {
       setPlacing(true);
@@ -293,7 +317,7 @@ export default function Page() {
                   {placedItems.map((it, i) => {
                     const qtySets = it.qty || 0;
                     const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
-                    const pricePerPiece = it.price || 0;
+                    const pricePerPiece = it.price || 0; // Catalog price is per piece
                     const lineTotal = qtySets * pcsPerSet * pricePerPiece;
                     return (
                       <div key={it.content_id + ':' + i} style={{ border: "1px solid #1f8b4c", borderRadius: 6, padding: 8, background: "#05140b" }}>
@@ -477,18 +501,24 @@ export default function Page() {
               value={bizName}
               onChange={(e) => setBizName(e.target.value)}
               maxLength={40}
-              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: bizError && !bizName.trim() ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: bizError && (!bizName.trim() || !/^[A-Za-z\s]+$/.test(bizName.trim())) ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
             />
             {bizError && !bizName.trim() && (
               <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 4 }}>Business Name is required</div>
             )}
+            {bizError && bizName.trim() && !/^[A-Za-z\s]+$/.test(bizName.trim()) && (
+              <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 4 }}>Business Name can contain letters and spaces only</div>
+            )}
             <input
               placeholder="GSTIN (optional)"
               value={gstin}
-              onChange={(e) => setGstin(e.target.value)}
+              onChange={(e) => setGstin(e.target.value.toUpperCase())}
               maxLength={20}
-              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: "1px solid #333", borderRadius: 6, marginBottom: 8, fontSize: 14, lineHeight: "1.4" }}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: gstError ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
             />
+            {gstError && (
+              <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 4 }}>{gstError}</div>
+            )}
             <textarea
               placeholder="Provide your Delivery Address"
               value={bizAddr}
@@ -504,7 +534,7 @@ export default function Page() {
 
           <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 8, paddingRight: 8 }}>
             <div style={{ fontWeight: 600 }}>Total: {formatCurrency(items[0]?.currency || 'INR')} {total.toFixed(2)}</div>
-            <button onClick={placeOrder} disabled={placing || items.length === 0} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
+            <button onClick={placeOrder} disabled={placing} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
               {placing ? "Placing…" : "Place Order"}
             </button>
           </div>
@@ -528,11 +558,11 @@ export default function Page() {
             left: "50%",
             bottom: 24,
             transform: "translateX(-50%)",
-            background: "#022c22",
-            color: "#bbf7d0",
+            background: toastError ? "#450a0a" : "#022c22",
+            color: toastError ? "#fecaca" : "#bbf7d0",
             padding: "10px 16px",
             borderRadius: 9999,
-            border: "1px solid #16a34a",
+            border: toastError ? "1px solid #b91c1c" : "1px solid #16a34a",
             fontSize: 13,
             boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
             zIndex: 1100,
