@@ -79,7 +79,14 @@ export default function Page() {
     setLoading(true);
     fetch(`/api/cart?u=${encodeURIComponent(waId)}&t=${encodeURIComponent(token)}`)
       .then(async (r) => {
-        if (!r.ok) throw new Error(`Cart error ${r.status}`);
+        if (!r.ok) {
+          let msg = `Cart error ${r.status}`;
+          try {
+            const j = await r.json();
+            if (j && typeof j.error === 'string') msg = j.error;
+          } catch (_) {}
+          throw new Error(msg);
+        }
         return r.json();
       })
       .then((j) => {
@@ -101,7 +108,14 @@ export default function Page() {
     setProdLoading(true);
     fetch(`/api/products?u=${encodeURIComponent(waId)}&t=${encodeURIComponent(token)}&type=${browseType}&page=${prodPage}`)
       .then(async (r) => {
-        if (!r.ok) throw new Error(`Products error ${r.status}`);
+        if (!r.ok) {
+          let msg = `Products error ${r.status}`;
+          try {
+            const j = await r.json();
+            if (j && typeof j.error === 'string') msg = j.error;
+          } catch (_) {}
+          throw new Error(msg);
+        }
         return r.json();
       })
       .then((j) => {
@@ -251,6 +265,18 @@ export default function Page() {
         <div>Missing link parameters.</div>
       ) : loading ? (
         <div>Loading…</div>
+      ) : error && error.startsWith('Error: checkout_session_') ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+          <div style={{ maxWidth: 520, width: "100%", background: "#0f1b12", border: "1px solid #1f8b4c", borderRadius: 8, padding: 16, textAlign: "center" }}>
+            <div style={{ fontSize: 18, marginBottom: 8, fontWeight: 600 }}>Your session has expired</div>
+            <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 10 }}>
+              For security, your checkout link can only be used once and for a limited time.
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.9 }}>
+              Please go back to your WhatsApp chat with us and request a new checkout link to continue browsing and placing orders.
+            </div>
+          </div>
+        </div>
       ) : orderId ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
           <div style={{ maxWidth: 520, width: "100%", background: "#0f1b12", border: "1px solid #1f8b4c", borderRadius: 8, padding: 16, textAlign: "center" }}>
