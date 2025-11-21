@@ -1,6 +1,5 @@
-import { getSession as dbGetSession, getCart as dbGetCart } from '../firestore.js';
-import { createOrderDoc } from '../firestore.js';
-import { verifyCheckoutToken } from '../lib/checkout.js';
+import { getSession as dbGetSession, getCart as dbGetCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
+import { getCheckoutTokenStatus } from '../lib/checkout.js';
 import { google } from 'googleapis';
 import { sendText } from '../lib/wa.js';
 
@@ -42,7 +41,11 @@ export function registerApiRoutes(app, adminDb) {
       const u = (req.query.u || '').toString().trim();
       const tkn = (req.query.t || '').toString().trim();
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN) {
+        const status = await getCheckoutTokenStatus(u, tkn);
+        console.log('CHECKOUT_STATUS', { u, tkn, status });
+        if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
+      }
 
       let business = { name: '', address: '' };
       try {
@@ -87,7 +90,10 @@ export function registerApiRoutes(app, adminDb) {
       const u = (req.body?.u || '').toString().trim();
       const tkn = (req.body?.t || '').toString().trim();
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN) {
+        const status = await getCheckoutTokenStatus(u, tkn);
+        if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
+      }
 
       const itemsIn = Array.isArray(req.body?.items) ? req.body.items : [];
       if (!itemsIn.length) return res.status(400).json({ ok: false, error: 'items required' });
@@ -128,6 +134,13 @@ export function registerApiRoutes(app, adminDb) {
         console.error('send WA order confirmation error', e);
       }
 
+      // Mark this checkout token as used so the link cannot be reused for another order
+      try {
+        if (!DISABLE_CHECKOUT_TOKEN && tkn) {
+          await markCheckoutTokenUsed(tkn);
+        }
+      } catch (_) { }
+
       return res.status(200).json({ ok: true, id });
     } catch (e) {
       console.error('POST /api/order error', e);
@@ -144,7 +157,10 @@ export function registerApiRoutes(app, adminDb) {
       const page = Math.max(1, parseInt((req.query.page || '1').toString(), 10) || 1);
       const pageSize = Math.max(1, Math.min(50, parseInt((req.query.pageSize || '20').toString(), 10) || 20));
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN) {
+        const status = await getCheckoutTokenStatus(u, tkn);
+        if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
+      }
 
       const doc = await adminDb.collection('products_by_type').doc(type).get();
       const list = doc.exists ? (doc.data().items || []) : [];
@@ -187,7 +203,10 @@ export function registerApiRoutes(app, adminDb) {
       const tkn = (req.query.t || '').toString().trim();
       const id = (req.query.id || req.query.content_id || '').toString().toLowerCase();
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
-      if (!DISABLE_CHECKOUT_TOKEN && !verifyCheckoutToken(u, tkn)) return res.sendStatus(401);
+      if (!DISABLE_CHECKOUT_TOKEN) {
+        const status = await getCheckoutTokenStatus(u, tkn);
+        if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
+      }
       if (!id) return res.status(400).json({ ok: false, error: 'id required' });
 
       const pd = await getProductDoc(adminDb, id);
