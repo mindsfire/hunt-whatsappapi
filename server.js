@@ -8,7 +8,7 @@ import { google } from 'googleapis';
 import { Storage } from '@google-cloud/storage';
 import { Firestore } from '@google-cloud/firestore';
 import { t } from './locales.js';
-import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId } from './lib/wa.js';
+import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId, sendOrderReviewTemplate } from './lib/wa.js';
 import { makeCheckoutToken, verifyCheckoutToken, buildCheckoutUrl } from './lib/checkout.js';
 import { graphGet, fetchSets, fetchSetItems, fetchSetProductsDetailed, parsePriceToNumber } from './lib/graph.js';
 import { getOrCreateMediaIdForGcsPath } from './lib/media.js';
