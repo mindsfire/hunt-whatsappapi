@@ -157,6 +157,15 @@ export default function Page() {
     }, 0);
   }, [items]);
 
+  const placedTotal = useMemo(() => {
+    return placedItems.reduce((s, it) => {
+      const qtySets = it.qty || 0;
+      const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+      const pricePerPiece = it.price || 0; // Catalog price is treated as per piece
+      return s + qtySets * pcsPerSet * pricePerPiece;
+    }, 0);
+  }, [placedItems]);
+
   const formatCurrency = (code: string) => {
     if ((code || '').toUpperCase() === 'INR') return '₹';
     return code;
@@ -311,34 +320,39 @@ export default function Page() {
             </div>
 
             {!!placedItems.length && (
-              <div style={{ textAlign: "left", marginTop: 4 }}>
-                <div style={{ fontWeight: 600, marginBottom: 8 }}>Bill summary</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {placedItems.map((it, i) => {
-                    const qtySets = it.qty || 0;
-                    const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
-                    const pricePerPiece = it.price || 0; // Catalog price is per piece
-                    const lineTotal = qtySets * pcsPerSet * pricePerPiece;
-                    return (
-                      <div key={it.content_id + ':' + i} style={{ border: "1px solid #1f8b4c", borderRadius: 6, padding: 8, background: "#05140b" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                          <div style={{ fontWeight: 600 }}>{it.title}</div>
-                          <div style={{ fontSize: 13 }}>
-                            {formatCurrency(it.currency)} {pricePerPiece}
-                            {it.pcs_per_set && it.pcs_per_set > 0 ? ` x ${it.pcs_per_set} Pcs Set` : ""}
+              <>
+                <div style={{ textAlign: "left", marginTop: 4 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>Bill summary</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {placedItems.map((it, i) => {
+                      const qtySets = it.qty || 0;
+                      const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+                      const pricePerPiece = it.price || 0; // Catalog price is per piece
+                      const lineTotal = qtySets * pcsPerSet * pricePerPiece;
+                      return (
+                        <div key={it.content_id + ':' + i} style={{ border: "1px solid #1f8b4c", borderRadius: 6, padding: 8, background: "#05140b" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                            <div style={{ fontWeight: 600 }}>{it.title}</div>
+                            <div style={{ fontSize: 13 }}>
+                              {formatCurrency(it.currency)} {pricePerPiece}
+                              {it.pcs_per_set && it.pcs_per_set > 0 ? ` x ${it.pcs_per_set} Pcs Set` : ""}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 13, opacity: 0.9 }}>
+                            Size: {it.size || '-'} &nbsp;·&nbsp; Sets: {qtySets}
+                          </div>
+                          <div style={{ fontSize: 13, marginTop: 2 }}>
+                            Line total: <b>{formatCurrency(it.currency)} {lineTotal.toFixed(2)}</b>
                           </div>
                         </div>
-                        <div style={{ fontSize: 13, opacity: 0.9 }}>
-                          Size: {it.size || '-'} &nbsp;·&nbsp; Sets: {qtySets}
-                        </div>
-                        <div style={{ fontSize: 13, marginTop: 2 }}>
-                          Line total: <b>{formatCurrency(it.currency)} {lineTotal.toFixed(2)}</b>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+                <div style={{ marginTop: 14, fontWeight: 600, fontSize: 16 }}>
+                  Grand total: {formatCurrency(placedItems[0]?.currency || 'INR')} {placedTotal.toFixed(2)}
+                </div>
+              </>
             )}
           </div>
         </div>
