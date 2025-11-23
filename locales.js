@@ -78,7 +78,10 @@ export const messages = {
     LANG_GATE_HEADER: "Welcome to Mans Impex!",
     LANG_GATE_BODY: "*Choose your language from the list below:*\n\nहिन्दी\nEnglish\nಕನ್ನಡ\nதமிழ்\nతెలుగు\nമലയാളം",
     LANG_GATE_FOOTER: "Tap a language to continue.",
-    BUTTON_START: "Start again"
+    BUTTON_START: "Start again",
+    BUTTON_CHANGE_LANGUAGE: "Change language",
+    LANG_CHANGED_CONFIRM: "Your preferred language is set.",
+    LANG_CHANGED_REORDER_INTRO: "Here is your fresh link to review items and reorder again."
   },
   kn: {
     LANG_GATE_PROMPT: "Choose your language / ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ",
@@ -154,7 +157,10 @@ export const messages = {
     FALLBACK_START: "ಪ್ರಾರಂಭಿಸಲು ಯಾವುದೇ ಸಂದೇಶವನ್ನು ಟೈಪ್ ಮಾಡಿ.",
     CATALOG_IMAGE_CAPTION: "{sku} | {title}\nPrice: {price} {currency}\nMOQ: {moq}\nType 'add {sku} <QTY>'",
     CATALOG_FOOTER: "Reply 'add <SKU> <QTY>' to add items, 'cart' to view, or 'checkout' to place order.",
-    BUTTON_START: "ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಿ"
+    BUTTON_START: "ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಿ",
+    BUTTON_CHANGE_LANGUAGE: "ಭಾಷೆ ಬದಲಾಯಿಸಿ",
+    LANG_CHANGED_CONFIRM: "ನಿಮ್ಮ ಆಯ್ಕೆಯ ಭಾಷೆಯನ್ನು ಸೆಟ್ ಮಾಡಲಾಗಿದೆ.",
+    LANG_CHANGED_REORDER_INTRO: "ಇಲ್ಲಿ ನಿಮ್ಮ items ಪರಿಶೀಲಿಸಿ ಮತ್ತೆ order ಮಾಡಲು ಹೊಸ link ಇಲ್ಲಿದೆ."
   },
   ta: {
     LANG_GATE_PROMPT: "Default language is English.\n\nIf you prefer another language, tap 'Select language / மொழி'.",
@@ -230,7 +236,10 @@ export const messages = {
     FALLBACK_START: "தொடங்க ஏதும் message type செய்யவும்.",
     CATALOG_IMAGE_CAPTION: "{sku} | {title}\nPrice: {price} {currency}\nMOQ: {moq}\nType 'add {sku} <QTY>'",
     CATALOG_FOOTER: "'add <SKU> <QTY>' என்று reply செய்து items ஐ cart இல் சேர்க்கவும், 'cart' மூலம் பார்க்கவும், 'checkout' மூலம் order செய்யவும்.",
-    BUTTON_START: "மீண்டும் தொடங்கு"
+    BUTTON_START: "மீண்டும் தொடங்கு",
+    BUTTON_CHANGE_LANGUAGE: "மொழி மாற்று",
+    LANG_CHANGED_CONFIRM: "உங்கள் விருப்ப மொழி அமைக்கப்பட்டது.",
+    LANG_CHANGED_REORDER_INTRO: "இங்கே உங்கள் items ஐ review செய்து மீண்டும் order செய்ய புதிய link உள்ளது."
   },
   te: {
     LANG_GATE_PROMPT: "Default language is English.\n\nIf you prefer another language, tap 'Select language / భాష'.",
@@ -306,7 +315,10 @@ export const messages = {
     FALLBACK_START: "ప్రారంభించడానికి ఏదైనా message type చేయండి.",
     CATALOG_IMAGE_CAPTION: "{sku} | {title}\nPrice: {price} {currency}\nMOQ: {moq}\nType 'add {sku} <QTY>'",
     CATALOG_FOOTER: "'add <SKU> <QTY>' అని reply చేసి items ని cart లో చేర్చండి, 'cart' తో చూడండి, 'checkout' తో order పెట్టండి.",
-    BUTTON_START: "మళ్లీ ప్రారంభించు"
+    BUTTON_START: "మళ్లీ ప్రారంభించు",
+    BUTTON_CHANGE_LANGUAGE: "భాష మార్చు",
+    LANG_CHANGED_CONFIRM: "మీరు ఎంచుకున్న భాష సెట్ చేయబడింది.",
+    LANG_CHANGED_REORDER_INTRO: "ఇక్కడ మీ items ని review చేసి మళ్లీ order చేయడానికి కొత్త link ఉంది."
   },
   hi: {
     LANG_GATE_PROMPT: "डिफ़ॉल्ट भाषा English है।\n\nअगर आप दूसरी भाषा चाहते हैं तो 'Select language / भाषा' दबाएँ।",
