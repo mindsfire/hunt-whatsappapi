@@ -8,7 +8,7 @@ import { google } from 'googleapis';
 import { Storage } from '@google-cloud/storage';
 import { Firestore } from '@google-cloud/firestore';
 import { t } from './locales.js';
-import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId, sendOrderReviewTemplate } from './lib/wa.js';
+import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId, sendOrderReviewTemplate, sendReorderTemplate } from './lib/wa.js';
 import { makeCheckoutToken, verifyCheckoutToken, buildCheckoutUrl } from './lib/checkout.js';
 import { graphGet, fetchSets, fetchSetItems, fetchSetProductsDetailed, parsePriceToNumber } from './lib/graph.js';
 import { getOrCreateMediaIdForGcsPath } from './lib/media.js';
@@ -551,7 +551,14 @@ async function sendCheckoutLink(toWaId) {
       if (sess && (sess.language || sess.locale)) lang = sess.language || sess.locale;
     } catch (_) { /* ignore, fallback to en */ }
     const intro = t(lang, 'CHECKOUT_LINK_INTRO');
-    await sendText(toWaId, `${intro}\n${url}`);
+    // Prefer the approved WhatsApp template with deep link button.
+    // If the template send fails for any reason, fall back to the plain text link.
+    try {
+      await sendOrderReviewTemplate(toWaId, url);
+    } catch (_) {
+      // Fallback: send the original text + URL so user still gets a working link.
+      await sendText(toWaId, `${intro}\n${url}`);
+    }
   } catch (_) { /* non-fatal */ }
 }
 
@@ -997,16 +1004,25 @@ async function handleMessage(waUserId, text, rawMsg) {
       try {
         const l = sess.language || lang || 'en';
         const url = await buildCheckoutUrl(waUserId);
-        const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
-        const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
-        const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
-        const msg = `${header}\n${body}\n${footer}`;
-        await sendText(to, msg);
+        // Prefer the 're_order_again' template so users see the approved
+        // order-review copy and buttons.
+        await sendReorderTemplate(to, url);
         // Stay in web_checkout state so future messages are treated as part of checkout.
         return;
       } catch (_) {
-        // Fallback to generic checkout link behavior if something fails.
-        try { await sendCheckoutLink(waUserId); } catch (_) {}
+        // Fallback: use the legacy restart header/body/footer text with inline URL.
+        try {
+          const l = sess.language || lang || 'en';
+          const url = await buildCheckoutUrl(waUserId);
+          const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
+          const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
+          const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
+          const msg = `${header}\n${body}\n${footer}`;
+          await sendText(to, msg);
+        } catch (_) {
+          // Last-resort fallback to generic checkout link behavior.
+          try { await sendCheckoutLink(waUserId); } catch (_) {}
+        }
         sess.state = 'web_checkout';
         await dbSaveSession(waUserId, sess);
         return;
@@ -1077,20 +1093,27 @@ async function handleMessage(waUserId, text, rawMsg) {
 
   // When user is already in web checkout mode and sends any message (other than 'start',
   // which is handled above), respond with a friendly, session-aware explanation
-  // formatted as Header (bold), Body, Footer (italic) plus helper buttons.
+  // formatted using the approved 're_order_again' WhatsApp template. If the
+  // template send fails, fall back to the legacy text + buttons helper.
   if (sess.state === 'web_checkout') {
-    const headerW = t(lang, 'WEB_CHECKOUT_SESSION_HEADER');
-    const bodyW = t(lang, 'WEB_CHECKOUT_SESSION_INFO');
-    const footerW = t(lang, 'WEB_CHECKOUT_SESSION_FOOTER');
-    const msgW = `*${headerW}*\n\n${bodyW}\n\n_${footerW}_`;
-    const startTitle = t(lang, 'BUTTON_START');
-    const changeLangTitle = t(lang, 'BUTTON_CHANGE_LANGUAGE');
-    const helpTitle = t(lang, 'BUTTON_HELP');
-    return sendButtons(to, msgW, [
-      { type: 'reply', reply: { id: 'web_restart', title: startTitle } },
-      { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
-      { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
-    ]);
+    try {
+      const url = await buildCheckoutUrl(waUserId);
+      await sendReorderTemplate(to, url);
+      return;
+    } catch (_) {
+      const headerW = t(lang, 'WEB_CHECKOUT_SESSION_HEADER');
+      const bodyW = t(lang, 'WEB_CHECKOUT_SESSION_INFO');
+      const footerW = t(lang, 'WEB_CHECKOUT_SESSION_FOOTER');
+      const msgW = `*${headerW}*\n\n${bodyW}\n\n_${footerW}_`;
+      const startTitle = t(lang, 'BUTTON_START');
+      const changeLangTitle = t(lang, 'BUTTON_CHANGE_LANGUAGE');
+      const helpTitle = t(lang, 'BUTTON_HELP');
+      return sendButtons(to, msgW, [
+        { type: 'reply', reply: { id: 'web_restart', title: startTitle } },
+        { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+        { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+      ]);
+    }
   }
 
   if (lower === 'view' || lower === 'add to cart' || lower === 'add') {
