@@ -776,25 +776,21 @@ function extractMessageText(m) {
 async function sendHelp(to, sess) {
   const state = sess && sess.state ? sess.state : 'start';
   const lang = (sess && (sess.language || sess.locale)) || 'en';
-  if (state === 'start' || state === 'ask_mode') {
-    return sendText(to, t(lang, 'ASK_MODE_HELP'));
-  }
-  if (state === 'types') {
-    return sendText(to, t(lang, 'TYPES_HELP'));
-  }
-  if (state === 'browse') {
-    return sendText(to, t(lang, 'BROWSE_HELP'));
-  }
-  if (state === 'detail') {
-    return sendText(to, t(lang, 'DETAIL_HELP'));
-  }
-  if (state === 'business') {
-    return sendText(to, t(lang, 'BUSINESS_PROMPT'));
-  }
   if (state === 'confirm') {
     return sendText(to, t(lang, 'CONFIRM_HELP'));
   }
-  return sendText(to, t(lang, 'HELP_FALLBACK'));
+  // For all other states, show a unified help/support message with buttons to
+  // avoid lazy typing.
+  const msg = t(lang, 'HELP_FALLBACK');
+
+  const startTitle = t(lang, 'BUTTON_START');
+  const changeLangTitle = t(lang, 'BUTTON_CHANGE_LANGUAGE');
+  const contactSupportTitle = t(lang, 'BUTTON_CONTACT_SUPPORT');
+  return sendButtons(to, msg, [
+    { type: 'reply', reply: { id: 'start', title: startTitle } },
+    { type: 'reply', reply: { id: 'help_change_lang', title: changeLangTitle } },
+    { type: 'reply', reply: { id: 'contact_support', title: contactSupportTitle } }
+  ]);
 }
 
 async function sendLanguageSelector(to) {
@@ -878,6 +874,16 @@ async function handleMessage(waUserId, text, rawMsg) {
           lower = 'start';
         } else if (idLower === 'native_order') {
           lower = 'native_order';
+        } else if (idLower === 'web_restart') {
+          lower = 'web_restart';
+        } else if (idLower === 'web_change_lang') {
+          lower = 'web_change_lang';
+        } else if (idLower === 'web_help') {
+          lower = 'help';
+        } else if (idLower === 'help_change_lang') {
+          lower = 'help_change_lang';
+        } else if (idLower === 'contact_support') {
+          lower = 'contact_support';
         }
       } else if (title) {
         const tLower = title.toLowerCase().trim();
@@ -892,6 +898,12 @@ async function handleMessage(waUserId, text, rawMsg) {
       }
     }
   } catch (_) { }
+
+  if (lower === 'contact support') {
+    lower = 'contact_support';
+  } else if (lower === 'change language') {
+    lower = 'help_change_lang';
+  }
 
   if (lower === 'help' || lower === 'type_help') {
     return sendHelp(to, sess);
@@ -913,6 +925,57 @@ async function handleMessage(waUserId, text, rawMsg) {
     sess.state = 'native_capture';
     await dbSaveSession(waUserId, sess);
     return sendText(to, 'Please paste the items and quantities you placed (or attach a screenshot). We will create an order and share the Order ID.');
+  }
+
+  if (lower === 'help_change_lang') {
+    // Global change language from Help
+    sess.state = 'lang_select';
+    await dbSaveSession(waUserId, sess);
+    return sendLanguageSelector(to);
+  }
+
+  if (lower === 'contact_support') {
+    // Show dedicated contact support message with navigation buttons
+    const langForSupport = (sess && (sess.language || sess.locale)) || 'en';
+    const body = t(langForSupport, 'CONTACT_SUPPORT_MESSAGE');
+    const startTitle = t(langForSupport, 'BUTTON_START');
+    const changeLangTitle = t(langForSupport, 'BUTTON_CHANGE_LANGUAGE');
+    const helpTitle = t(langForSupport, 'BUTTON_HELP');
+    return sendButtons(to, body, [
+      { type: 'reply', reply: { id: 'start', title: startTitle } },
+      { type: 'reply', reply: { id: 'help_change_lang', title: changeLangTitle } },
+      { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+    ]);
+  }
+
+  if (lower === 'web_restart') {
+    // Explicit restart from web checkout via button
+    try {
+      const l = sess.language || lang || 'en';
+      const url = await buildCheckoutUrl(waUserId);
+      const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
+      const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
+      const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
+      const msg = `${header}\n${body}\n${footer}`;
+      await sendText(to, msg);
+      // Keep web_checkout state
+      sess.state = 'web_checkout';
+      await dbSaveSession(waUserId, sess);
+      return;
+    } catch (_) {
+      try { await sendCheckoutLink(waUserId); } catch (_) {}
+      sess.state = 'web_checkout';
+      await dbSaveSession(waUserId, sess);
+      return;
+    }
+  }
+
+  if (lower === 'web_change_lang') {
+    // User wants to change language while in web checkout
+    sess.change_lang_from = 'web_checkout';
+    sess.state = 'lang_select';
+    await dbSaveSession(waUserId, sess);
+    return sendLanguageSelector(to);
   }
 
   if (lower === 'start' || lower === 'hi' || lower === 'hello') {
@@ -1014,13 +1077,20 @@ async function handleMessage(waUserId, text, rawMsg) {
 
   // When user is already in web checkout mode and sends any message (other than 'start',
   // which is handled above), respond with a friendly, session-aware explanation
-  // formatted as Header (bold), Body, Footer (italic) instead of restarting flow.
+  // formatted as Header (bold), Body, Footer (italic) plus helper buttons.
   if (sess.state === 'web_checkout') {
     const headerW = t(lang, 'WEB_CHECKOUT_SESSION_HEADER');
     const bodyW = t(lang, 'WEB_CHECKOUT_SESSION_INFO');
     const footerW = t(lang, 'WEB_CHECKOUT_SESSION_FOOTER');
     const msgW = `*${headerW}*\n\n${bodyW}\n\n_${footerW}_`;
-    return sendText(to, msgW);
+    const startTitle = t(lang, 'BUTTON_START');
+    const changeLangTitle = t(lang, 'BUTTON_CHANGE_LANGUAGE');
+    const helpTitle = t(lang, 'BUTTON_HELP');
+    return sendButtons(to, msgW, [
+      { type: 'reply', reply: { id: 'web_restart', title: startTitle } },
+      { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+      { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+    ]);
   }
 
   if (lower === 'view' || lower === 'add to cart' || lower === 'add') {
@@ -1073,6 +1143,22 @@ async function handleMessage(waUserId, text, rawMsg) {
     if (lower === 'lang en' || lower === 'english') {
       // Proceed in English directly
       sess.language = 'en';
+      // If language change was requested from web checkout, confirm and resend link
+      if (sess.change_lang_from === 'web_checkout') {
+        delete sess.change_lang_from;
+        sess.state = 'web_checkout';
+        await dbSaveSession(waUserId, sess);
+        try {
+          const url = await buildCheckoutUrl(waUserId);
+          const confirm = t('en', 'LANG_CHANGED_CONFIRM');
+          const intro = t('en', 'LANG_CHANGED_REORDER_INTRO');
+          const msg = `${confirm}\n${intro}\n\n${url}`;
+          return sendText(to, msg);
+        } catch (_) {
+          try { await sendCheckoutLink(waUserId); } catch (_) {}
+          return;
+        }
+      }
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
       const headerEn = t('en', 'WHOLESALE_GREETING_HEADER');
@@ -1097,9 +1183,25 @@ async function handleMessage(waUserId, text, rawMsg) {
     }
 
     if (sess.language) {
+      const l = sess.language;
+      // If language change was requested from web checkout, confirm and resend link
+      if (sess.change_lang_from === 'web_checkout') {
+        delete sess.change_lang_from;
+        sess.state = 'web_checkout';
+        await dbSaveSession(waUserId, sess);
+        try {
+          const url = await buildCheckoutUrl(waUserId);
+          const confirm = t(l, 'LANG_CHANGED_CONFIRM');
+          const intro = t(l, 'LANG_CHANGED_REORDER_INTRO');
+          const msg = `${confirm}\n${intro}\n\n${url}`;
+          return sendText(to, msg);
+        } catch (_) {
+          try { await sendCheckoutLink(waUserId); } catch (_) {}
+          return;
+        }
+      }
       sess.state = 'ask_mode';
       await dbSaveSession(waUserId, sess);
-      const l = sess.language;
       const header = t(l, 'WHOLESALE_GREETING_HEADER');
       const body = t(l, 'WHOLESALE_GREETING_BODY');
       const footer = t(l, 'WHOLESALE_GREETING_FOOTER');
