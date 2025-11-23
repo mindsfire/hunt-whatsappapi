@@ -1,9 +1,28 @@
-import { getSession as dbGetSession, getCart as dbGetCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
+import { getSession as dbGetSession, saveSession as dbSaveSession, getCart as dbGetCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
 import { getCheckoutTokenStatus } from '../lib/checkout.js';
 import { google } from 'googleapis';
-import { sendText } from '../lib/wa.js';
+import { sendButtons, sendText } from '../lib/wa.js';
+import { t } from '../locales.js';
 
 function nowIso() { return new Date().toISOString(); }
+
+function formatOrderItemsForSheet(items) {
+  if (!Array.isArray(items) || !items.length) return '';
+  const parts = [];
+  for (const it of items) {
+    if (!it) continue;
+    const name = (it.title || it.sku || '').toString();
+    if (!name) continue;
+    const size = (it.size || '').toString();
+    const qty = Number(it.qty || 0) || 0;
+
+    let segment = name;
+    if (size) segment += ' - ' + size;
+    if (qty) segment += ' * ' + qty;
+    parts.push(segment);
+  }
+  return parts.join(', ');
+}
 
 const DISABLE_CHECKOUT_TOKEN = ((process.env.DISABLE_CHECKOUT_TOKEN || 'false').toString().toLowerCase() === 'true');
 
@@ -21,7 +40,11 @@ async function appendOrderToSheet(order) {
   try {
     const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
     const sheets = google.sheets({ version: 'v4', auth });
-    const row = [order.created_at, order.id, order.wa_user_id, order.business.name || '', JSON.stringify(order.items), order.subtotal, order.currency, 'placed'];
+    const itemsSummary = formatOrderItemsForSheet(order.items);
+    const business = order.business || {};
+    const gstin = (business.gstin || '').toString();
+    const address = (business.address || '').toString();
+    const row = [order.created_at, order.id, order.wa_user_id, business.name || '', gstin, address, itemsSummary, order.subtotal, order.currency, 'placed'];
     await sheets.spreadsheets.values.append({
       spreadsheetId: SALES_SHEET_ID,
       range: 'Orders!A1',
@@ -47,12 +70,13 @@ export function registerApiRoutes(app, adminDb) {
         if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
       }
 
-      let business = { name: '', address: '' };
+      let business = { name: '', address: '', gstin: '' };
       try {
         const sess = await dbGetSession(u);
         business = {
           name: sess?.business_name || sess?.business?.name || '',
-          address: sess?.business_address || sess?.business?.address || ''
+          address: sess?.business_address || sess?.business?.address || '',
+          gstin: sess?.business_gstin || sess?.business?.gstin || sess?.gstin || ''
         };
       } catch (_) {}
 
@@ -107,18 +131,38 @@ export function registerApiRoutes(app, adminDb) {
         if (!cid || !qty) continue;
         const pd = await getProductDoc(adminDb, cid);
         if (!pd) continue;
-        const unit_price = Number(pd.price || 0) || 0;
+        const pricePerPiece = Number(pd.price || 0) || 0;
         currency = (pd.currency || 'INR').toString();
-        outItems.push({ sku: cid.toUpperCase(), qty, unit_price, currency, size: it.size || '' });
-        subtotal += unit_price * qty;
+        const title = pd.title || cid.toUpperCase();
+        const rawPcsPerSet = Number(pd.pcs_per_set || 0) || 0;
+        const pcs_per_set = rawPcsPerSet > 0 ? rawPcsPerSet : 1;
+        const lineTotal = qty * pcs_per_set * pricePerPiece;
+        outItems.push({ sku: cid.toUpperCase(), title, qty, unit_price: pricePerPiece, currency, size: it.size || '', pcs_per_set });
+        subtotal += lineTotal;
       }
 
       if (!outItems.length) return res.status(400).json({ ok: false, error: 'no valid items' });
 
       const business = {
         name: (req.body?.business?.name || '').toString(),
-        address: (req.body?.business?.address || '').toString()
+        address: (req.body?.business?.address || '').toString(),
+        gstin: (req.body?.business?.gstin || '').toString()
       };
+
+      try {
+        await dbSaveSession(u, {
+          business_name: business.name,
+          business_address: business.address,
+          business_gstin: business.gstin,
+          business: {
+            name: business.name,
+            address: business.address,
+            gstin: business.gstin
+          }
+        });
+      } catch (e) {
+        console.error('saveSession business update error', e);
+      }
 
       const id = 'ORD-' + Math.random().toString(36).slice(2, 10).toUpperCase();
       const order = { id, wa_user_id: u, business, items: outItems, currency, subtotal, created_at: nowIso(), source: 'web_checkout' };
@@ -128,8 +172,28 @@ export function registerApiRoutes(app, adminDb) {
 
       // Best-effort WhatsApp confirmation back to the user
       try {
-        const msg = `Your order has been placed successfully. Order ID: ${id}`;
-        await sendText(u, msg);
+        let lang = 'en';
+        try {
+          const sess = await dbGetSession(u);
+          if (sess && (sess.language || sess.locale)) lang = sess.language || sess.locale;
+        } catch (_) { }
+
+        const header = t(lang, 'ORDER_CONFIRM_HEADER');
+        const bodyText = t(lang, 'ORDER_CONFIRM_BODY', { id });
+        const footer = t(lang, 'ORDER_CONFIRM_FOOTER');
+        const fullMsg = `${header}\n\n${bodyText}\n\n${footer}`;
+        await sendText(u, fullMsg);
+
+        const orderAgainTitle = t(lang, 'BUTTON_ORDER_AGAIN') || 'Order again';
+        const contactSupportTitle = t(lang, 'BUTTON_CONTACT_SUPPORT');
+        const helpTitle = t(lang, 'BUTTON_HELP');
+        const nextStepsBody = t(lang, 'NEXT_STEPS_TITLE') || 'Next steps';
+
+        await sendButtons(u, nextStepsBody, [
+          { type: 'reply', reply: { id: 'web_restart', title: orderAgainTitle } },
+          { type: 'reply', reply: { id: 'contact_support', title: contactSupportTitle } },
+          { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+        ]);
       } catch (e) {
         console.error('send WA order confirmation error', e);
       }

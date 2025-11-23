@@ -43,3 +43,6 @@ npm --prefix web run build
 kill -9 $(lsof -ti tcp:8080)
 node server.js
 open "http://localhost:8080/checkout/?u=dev&t=dev"
+
+#git delete local branch
+git branch -vv | awk '/: gone]/{print $1}' | xargs git branch -d

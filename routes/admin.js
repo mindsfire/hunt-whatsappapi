@@ -126,9 +126,43 @@ export function registerAdminRoutes(app, adminDb) {
 
       await batch.commit();
 
-      return res.status(200).json({ ok: true, counts: { imported: (imported || []).length, indian: (indian || []).length } });
+      const importedCount = (imported || []).length;
+      const indianCount = (indian || []).length;
+      const syncAt = nowIso();
+      try {
+        const syncRef = adminDb.collection('config').doc('sync_from_cm');
+        await syncRef.set({
+          last_sync_at: syncAt,
+          last_counts: { imported: importedCount, indian: indianCount }
+        }, { merge: true });
+      } catch (e) {
+        console.error('sync-from-cm: failed to persist sync metadata', e);
+      }
+
+      return res.status(200).json({ ok: true, counts: { imported: importedCount, indian: indianCount }, lastSyncAt: syncAt });
     } catch (e) {
       console.error('sync-from-cm error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: Get last Commerce Manager sync status ---
+  // Usage: GET /admin/sync-status
+  // No shared-secret required; this only returns metadata (timestamp + counts).
+  app.get('/admin/sync-status', async (req, res) => {
+    try {
+      const doc = await adminDb.collection('config').doc('sync_from_cm').get();
+      if (!doc.exists) {
+        return res.status(200).json({ ok: true, lastSyncAt: null, counts: { imported: 0, indian: 0 } });
+      }
+      const data = doc.data() || {};
+      const lastSyncAt = data.last_sync_at || null;
+      const lastCounts = data.last_counts || {};
+      const imported = typeof lastCounts.imported === 'number' ? lastCounts.imported : 0;
+      const indian = typeof lastCounts.indian === 'number' ? lastCounts.indian : 0;
+      return res.status(200).json({ ok: true, lastSyncAt, counts: { imported, indian } });
+    } catch (e) {
+      console.error('sync-status error', e);
       return res.status(200).json({ ok: false, error: String(e) });
     }
   });
