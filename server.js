@@ -776,25 +776,21 @@ function extractMessageText(m) {
 async function sendHelp(to, sess) {
   const state = sess && sess.state ? sess.state : 'start';
   const lang = (sess && (sess.language || sess.locale)) || 'en';
-  if (state === 'start' || state === 'ask_mode') {
-    return sendText(to, t(lang, 'ASK_MODE_HELP'));
-  }
-  if (state === 'types') {
-    return sendText(to, t(lang, 'TYPES_HELP'));
-  }
-  if (state === 'browse') {
-    return sendText(to, t(lang, 'BROWSE_HELP'));
-  }
-  if (state === 'detail') {
-    return sendText(to, t(lang, 'DETAIL_HELP'));
-  }
-  if (state === 'business') {
-    return sendText(to, t(lang, 'BUSINESS_PROMPT'));
-  }
   if (state === 'confirm') {
     return sendText(to, t(lang, 'CONFIRM_HELP'));
   }
-  return sendText(to, t(lang, 'HELP_FALLBACK'));
+  // For all other states, show a unified help/support message with buttons to
+  // avoid lazy typing.
+  const msg = t(lang, 'HELP_FALLBACK');
+
+  const startTitle = t(lang, 'BUTTON_START');
+  const changeLangTitle = t(lang, 'BUTTON_CHANGE_LANGUAGE');
+  const contactSupportTitle = t(lang, 'BUTTON_CONTACT_SUPPORT');
+  return sendButtons(to, msg, [
+    { type: 'reply', reply: { id: 'start', title: startTitle } },
+    { type: 'reply', reply: { id: 'help_change_lang', title: changeLangTitle } },
+    { type: 'reply', reply: { id: 'contact_support', title: contactSupportTitle } }
+  ]);
 }
 
 async function sendLanguageSelector(to) {
@@ -884,6 +880,10 @@ async function handleMessage(waUserId, text, rawMsg) {
           lower = 'web_change_lang';
         } else if (idLower === 'web_help') {
           lower = 'help';
+        } else if (idLower === 'help_change_lang') {
+          lower = 'help_change_lang';
+        } else if (idLower === 'contact_support') {
+          lower = 'contact_support';
         }
       } else if (title) {
         const tLower = title.toLowerCase().trim();
@@ -898,6 +898,12 @@ async function handleMessage(waUserId, text, rawMsg) {
       }
     }
   } catch (_) { }
+
+  if (lower === 'contact support') {
+    lower = 'contact_support';
+  } else if (lower === 'change language') {
+    lower = 'help_change_lang';
+  }
 
   if (lower === 'help' || lower === 'type_help') {
     return sendHelp(to, sess);
@@ -919,6 +925,27 @@ async function handleMessage(waUserId, text, rawMsg) {
     sess.state = 'native_capture';
     await dbSaveSession(waUserId, sess);
     return sendText(to, 'Please paste the items and quantities you placed (or attach a screenshot). We will create an order and share the Order ID.');
+  }
+
+  if (lower === 'help_change_lang') {
+    // Global change language from Help
+    sess.state = 'lang_select';
+    await dbSaveSession(waUserId, sess);
+    return sendLanguageSelector(to);
+  }
+
+  if (lower === 'contact_support') {
+    // Show dedicated contact support message with navigation buttons
+    const langForSupport = (sess && (sess.language || sess.locale)) || 'en';
+    const body = t(langForSupport, 'CONTACT_SUPPORT_MESSAGE');
+    const startTitle = t(langForSupport, 'BUTTON_START');
+    const changeLangTitle = t(langForSupport, 'BUTTON_CHANGE_LANGUAGE');
+    const helpTitle = t(langForSupport, 'BUTTON_HELP');
+    return sendButtons(to, body, [
+      { type: 'reply', reply: { id: 'start', title: startTitle } },
+      { type: 'reply', reply: { id: 'help_change_lang', title: changeLangTitle } },
+      { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+    ]);
   }
 
   if (lower === 'web_restart') {

@@ -18,7 +18,7 @@ export const messages = {
     DETAIL_HELP: "Reply 'more images' to see more, 'browse' to return to list, 'add <SKU> <QTY>' to add to cart, 'types' to change category.",
     BUSINESS_PROMPT: "Reply your Business Name (e.g., biz Mindsfire).",
     CONFIRM_HELP: "Press Confirm to place the order or Cancel to discard.",
-    HELP_FALLBACK: "Type 'Wholesale' to start, or 'types' to browse categories. You can type 'help' anytime.",
+    HELP_FALLBACK: "*Need help with your wholesale order?*\n\nYou can use the options below to continue:\n\n- *Start again* – Restart the wholesale flow from the beginning.\n- *Change language* – Switch the WhatsApp conversation to a different language.\n- *Contact support* – Reach our sales team if you're stuck or need assistance.\n\n_If you're not sure what to do, choose *Start again* or *Change language*, or select *Contact support* for help._",
     CHECKOUT_LINK_INTRO: "Use this link to check your items, confirm quantities, add business details, and place your wholesale order:",
     WEB_CHECKOUT_SESSION_HEADER: "You're already in the wholesale ordering step.",
     WEB_CHECKOUT_SESSION_INFO: "You're already set up as a wholesale buyer and we shared a checkout link above.\nIf that link expired or you want to start fresh, type \"start\" and we'll send you a new one.",
@@ -68,6 +68,8 @@ export const messages = {
     BUTTON_LANG_SELECT: "Select language",
     BUTTON_CHOOSE_SKU: "Choose SKU",
     BUTTON_QTYPLUS: "+1 set",
+    BUTTON_CONTACT_SUPPORT: "Contact support",
+    CONTACT_SUPPORT_MESSAGE: "*Contact support*\n\nIf you need assistance with your wholesale order, you can reach our sales team:\n\n- Email: *connect.mansimpex@gmail.com*\n- Sales: *91871 17080*, *84960 07080*\n\n_You can also use the options below to restart or change language if needed._",
     PRODUCTS_PAGE_HEADER: "Products ({type}) page {page}/{totalPages}",
     PRODUCTS_PAGE_TITLE: "Page {page}/{totalPages}",
     BROWSE_INLINE_HELP: "Type 'view <SKU>' to see details, 'next'/'prev' to page, 'add <SKU> <QTY>' to add items, 'cart' to view, or 'checkout' to place order.",
@@ -102,7 +104,7 @@ export const messages = {
     DETAIL_HELP: "ಹೆಚ್ಚು ಚಿತ್ರಗಳಿಗೆ 'more images', ಲಿಸ್ಟಿಗೆ ಮರಳಲು 'browse', ಕಾರ್ಟಿಗೆ ಸೇರಿಸಲು 'add <SKU> <QTY>', ಕ್ಯಾಟಗರಿ ಬದಲಾಯಿಸಲು 'types' ಬಳಿಸಿ.",
     BUSINESS_PROMPT: "ನಿಮ್ಮ ಬಿಸಿನೆಸ್ ಹೆಸರನ್ನು ರಿಪ್ಲೈ ಮಾಡಿ (ಉದಾಹರಣೆ: biz Mindsfire).",
     CONFIRM_HELP: "ಆರ್ಡರ್ ಮಾಡಲು Confirm, ರದ್ದುಗೊಳಿಸಲು Cancel ಒತ್ತಿ.",
-    HELP_FALLBACK: "ಪ್ರಾರಂಭಿಸಲು 'Wholesale' ಎಂದು ಟೈಪ್ ಮಾಡಿ, ಅಥವಾ ಕ್ಯಾಟಗರಿ ನೋಡಲು 'types' ಬಳಸಿ. ಯಾವಾಗ ಬೇಕಾದರೂ 'help' ಎಂದು ಟೈಪ್ ಮಾಡಬಹುದು.",
+    HELP_FALLBACK: "*ನಿಮ್ಮ wholesale order ಗೆ ಸಹಾಯ ಬೇಕೇ?*\n\nಮುಂದುವರಿಸಲು ಕೆಳಗಿನ ಆಯ್ಕೆಗಳನ್ನು ಬಳಸಿ:\n\n- *ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಿ* – wholesale flow ಅನ್ನು ಆರಂಭದಿಂದ ಮತ್ತೆ ಪ್ರಾರಂಭಿಸುತ್ತದೆ.\n- *ಭಾಷೆ ಬದಲಾಯಿಸಿ* – WhatsApp ಸಂಭಾಷಣೆಯ ಭಾಷೆಯನ್ನು ಬದಲಾಯಿಸುತ್ತದೆ.\n- *ಸಪೋರ್ಟ್ ಸಂಪರ್ಕ* – ನೀವು ಸಿಕ್ಕಿಹಾಕಿಕೊಂಡಿದ್ದರೆ ನಮ್ಮ sales ತಂಡವನ್ನು ಸಂಪರ್ಕಿಸಲು.\n\n_ಏನು ಮಾಡಬೇಕು ಎಂದು ಖಚಿತವಾಗಿಲ್ಲದಿದ್ದರೆ, *ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಿ* ಅಥವಾ *ಭಾಷೆ ಬದಲಾಯಿಸಿ* ಆಯ್ಕೆಮಾಡಿ, ಅಥವಾ *ಸಪೋರ್ಟ್ ಸಂಪರ್ಕ* ಆಯ್ಕೆಮಾಡಿ._",
     CHECKOUT_LINK_INTRO: "ಈ link ಬಳಸಿ ನಿಮ್ಮ items ಪರಿಶೀಲಿಸಿ, quantity ದೃಢೀಕರಿಸಿ, business ವಿವರಗಳನ್ನು ಸೇರಿಸಿ, ಮತ್ತು ನಿಮ್ಮ wholesale order place ಮಾಡಿ:",
     WEB_CHECKOUT_SESSION_HEADER: "ನೀವು ಈಗಾಗಲೇ wholesale order ಹಂತದಲ್ಲಿ ಇದ್ದೀರಿ.",
     WEB_CHECKOUT_SESSION_INFO: "ನಿಮಗಾಗಿ ಈಗಾಗಲೇ wholesale checkout link ಕಳುಹಿಸಿದ್ದೇವೆ.\nಆ link ಅವಧಿ ಮುಗಿದಿದ್ದರೆ ಅಥವಾ ಹೊಸದಾಗಿ ಪ್ರಾರಂಭಿಸಲು ಬಯಸಿದರೆ 'start' ಎಂದು ಟೈಪ್ ಮಾಡಿ, ನಾವು ಹೊಸ link ಕಳುಹಿಸುತ್ತೇವೆ.",
@@ -160,7 +162,9 @@ export const messages = {
     BUTTON_START: "ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಿ",
     BUTTON_CHANGE_LANGUAGE: "ಭಾಷೆ ಬದಲಾಯಿಸಿ",
     LANG_CHANGED_CONFIRM: "ನಿಮ್ಮ ಆಯ್ಕೆಯ ಭಾಷೆಯನ್ನು ಸೆಟ್ ಮಾಡಲಾಗಿದೆ.",
-    LANG_CHANGED_REORDER_INTRO: "ಇಲ್ಲಿ ನಿಮ್ಮ items ಪರಿಶೀಲಿಸಿ ಮತ್ತೆ order ಮಾಡಲು ಹೊಸ link ಇಲ್ಲಿದೆ."
+    LANG_CHANGED_REORDER_INTRO: "ಇಲ್ಲಿ ನಿಮ್ಮ items ಪರಿಶೀಲಿಸಿ ಮತ್ತೆ order ಮಾಡಲು ಹೊಸ link ಇಲ್ಲಿದೆ.",
+    BUTTON_CONTACT_SUPPORT: "ಸಪೋರ್ಟ್ ಸಂಪರ್ಕ",
+    CONTACT_SUPPORT_MESSAGE: "*ಸಪೋರ್ಟ್ ಸಂಪರ್ಕ*\n\nನಿಮ್ಮ wholesale order ಬಗ್ಗೆ ಸಹಾಯ ಬೇಕಿದ್ದರೆ, ನಮ್ಮ sales ತಂಡವನ್ನು ಸಂಪರ್ಕಿಸಬಹುದು:\n\n- Email: *connect.mansimpex@gmail.com*\n- Sales: *91871 17080*, *84960 07080*\n\n_ಅವಶ್ಯವಿದ್ದರೆ ಕೆಳಗಿನ ಆಯ್ಕೆಗಳಿಂದ ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಬಹುದು ಅಥವಾ ಭಾಷೆ ಬದಲಾಯಿಸಬಹುದು._"
   },
   ta: {
     LANG_GATE_PROMPT: "Default language is English.\n\nIf you prefer another language, tap 'Select language / மொழி'.",
@@ -181,7 +185,7 @@ export const messages = {
     DETAIL_HELP: "மேலும் படங்களுக்கு 'more images', பட்டியலுக்கு திரும்ப 'browse', cart இல் சேர்க்க 'add <SKU> <QTY>', category மாற்ற 'types' பயன்படுத்தவும்.",
     BUSINESS_PROMPT: "உங்கள் business பெயரை reply செய்யவும் (உதா: biz Mindsfire).",
     CONFIRM_HELP: "Order செய்ய Confirm ஐ, ரத்து செய்ய Cancel ஐ அழுத்தவும்.",
-    HELP_FALLBACK: "தொடங்க 'Wholesale' என்று type செய்யவும், அல்லது category பார்க்க 'types' பயன்படுத்தவும். எப்போதும் 'help' என்று type செய்யலாம்.",
+    HELP_FALLBACK: "*உங்கள் wholesale order க்கு உதவி வேண்டுமா?*\n\nதொடர கீழே உள்ள விருப்பங்களை பயன்படுத்தலாம்:\n\n- *மீண்டும் தொடங்கு* – wholesale flow ஐ ஆரம்பத்திலிருந்து மீண்டும் தொடங்கும்.\n- *மொழி மாற்று* – WhatsApp உரையாடல் மொழியை மாற்றும்.\n- *Support தொடர்பு* – சிக்கலில் இருந்தால் எங்கள் sales குழுவை தொடர்பு கொள்ள.\n\n_எதைச் செய்ய வேண்டும் என்று உறுதி இல்லையெனில், *மீண்டும் தொடங்கு* அல்லது *மொழி மாற்று* தேர்வு செய்யவும், அல்லது *Support தொடர்பு* ஐத் தேர்வு செய்யவும்._",
     CHECKOUT_LINK_INTRO: "இந்த link ஐ பயன்படுத்தி உங்கள் items ஐச் சோதித்து, quantities ஐ உறுதிப்படுத்தி, business விவரங்களை சேர்த்து, உங்கள் wholesale order ஐ complete செய்யவும்:",
     WEB_CHECKOUT_SESSION_HEADER: "நீங்கள் ஏற்கனவே wholesale order படியில் இருக்கிறீர்கள்.",
     WEB_CHECKOUT_SESSION_INFO: "உங்களுக்கான wholesale checkout link ஐ ஏற்கனவே இந்த chat ல் பகிர்ந்திருக்கிறோம்.\nஅந்த link காலாவதியானால் அல்லது புதிதாக தொடங்க வேண்டுமெனில் 'start' என்று type செய்யவும், நாங்கள் புதிய link அனுப்புகிறோம்.",
@@ -239,7 +243,9 @@ export const messages = {
     BUTTON_START: "மீண்டும் தொடங்கு",
     BUTTON_CHANGE_LANGUAGE: "மொழி மாற்று",
     LANG_CHANGED_CONFIRM: "உங்கள் விருப்ப மொழி அமைக்கப்பட்டது.",
-    LANG_CHANGED_REORDER_INTRO: "இங்கே உங்கள் items ஐ review செய்து மீண்டும் order செய்ய புதிய link உள்ளது."
+    LANG_CHANGED_REORDER_INTRO: "இங்கே உங்கள் items ஐ review செய்து மீண்டும் order செய்ய புதிய link உள்ளது.",
+    BUTTON_CONTACT_SUPPORT: "Support தொடர்பு",
+    CONTACT_SUPPORT_MESSAGE: "*Support தொடர்பு*\n\nஉங்கள் wholesale order பற்றி உதவி தேவையானால், எங்கள் sales குழுவை தொடர்பு கொள்ளலாம்:\n\n- Email: *connect.mansimpex@gmail.com*\n- Sales: *91871 17080*, *84960 07080*\n\n_தேவையானால் கீழே உள்ள தேர்வுகளை பயன்படுத்தி மீண்டும் தொடங்கவோ அல்லது மொழியை மாற்றவோலாம்._"
   },
   te: {
     LANG_GATE_PROMPT: "Default language is English.\n\nIf you prefer another language, tap 'Select language / భాష'.",
@@ -260,7 +266,7 @@ export const messages = {
     DETAIL_HELP: "మరిన్ని చిత్రాల కోసం 'more images', list కి తిరిగేందుకు 'browse', cart లోకి చేర్చడానికి 'add <SKU> <QTY>', category మార్చడానికి 'types' వాడండి.",
     BUSINESS_PROMPT: "మీ business పేరు reply చేయండి (ఉదా: biz Mindsfire).",
     CONFIRM_HELP: "Order పెట్టడానికి Confirm, రద్దు చేయడానికి Cancel నొక్కండి.",
-    HELP_FALLBACK: "ప్రారంభించడానికి 'Wholesale' అని type చేయండి, లేదా categories చూడడానికి 'types' వాడండి. ఎప్పుడైనా 'help' అని type చేయొచ్చు.",
+    HELP_FALLBACK: "*మీ wholesale order కోసం సహాయం కావాలా?*\n\nకొనసాగడానికి క్రింది ఎంపికలను ఉపయోగించండి:\n\n- *మళ్లీ ప్రారంభించు* – wholesale flow ను మొదటి నుండి మళ్లీ ప్రారంభిస్తుంది.\n- *భాష మార్చు* – WhatsApp సంభాషణ భాషను మార్చుతుంది.\n- *సపోర్ట్ సంప్రదించండి* – మీరు ఇరుక్కుపోయినప్పుడు మా sales టీమ్‌ను సంప్రదించడానికి.\n\n_ఏం చేయాలి అని ఖచ్చితంగా తెలియకపోతే, *మళ్లీ ప్రారంభించు* లేదా *భాష మార్చు* ఎంచుకోండి, లేదా *సపోర్ట్ సంప్రదించండి* ని ఎంచుకోండి._",
     CHECKOUT_LINK_INTRO: "ఈ link తో మీ items చెక్ చేసి, quantities ను confirm చేసి, business వివరాలు జోడించి, మీ wholesale order ను complete చేయండి:",
     WEB_CHECKOUT_SESSION_HEADER: "మీరు ఇప్పటికే wholesale ఆర్డర్ దశలో ఉన్నారు.",
     WEB_CHECKOUT_SESSION_INFO: "మీ కోసం wholesale checkout link ని ఈ chat లోనే ఇప్పటికే షేర్ చేసాం.\nఆ link expire అయితే లేదా మళ్లీ కొత్తగా ప్రారంభించాలనుకుంటే 'start' అని type చేయండి, మేము కొత్త link పంపుతాం.",
@@ -310,15 +316,6 @@ export const messages = {
     BUTTON_QTYPLUS: "+1 set",
     PRODUCTS_PAGE_HEADER: "Products ({type}) page {page}/{totalPages}",
     PRODUCTS_PAGE_TITLE: "Page {page}/{totalPages}",
-    BROWSE_INLINE_HELP: "'view <SKU>' తో వివరాలు చూడండి, 'next'/'prev' తో page మార్చండి, 'add <SKU> <QTY>' తో cart లో చేర్చండి, 'cart' తో cart చూడండి, 'checkout' తో order పెట్టండి.",
-    DETAIL_INLINE_HELP: "మరిన్ని చిత్రాలకు 'more images', తిరిగి వెళ్లేందుకు 'browse', category మార్చడానికి 'types' వాడండి.",
-    FALLBACK_START: "ప్రారంభించడానికి ఏదైనా message type చేయండి.",
-    CATALOG_IMAGE_CAPTION: "{sku} | {title}\nPrice: {price} {currency}\nMOQ: {moq}\nType 'add {sku} <QTY>'",
-    CATALOG_FOOTER: "'add <SKU> <QTY>' అని reply చేసి items ని cart లో చేర్చండి, 'cart' తో చూడండి, 'checkout' తో order పెట్టండి.",
-    BUTTON_START: "మళ్లీ ప్రారంభించు",
-    BUTTON_CHANGE_LANGUAGE: "భాష మార్చు",
-    LANG_CHANGED_CONFIRM: "మీరు ఎంచుకున్న భాష సెట్ చేయబడింది.",
-    LANG_CHANGED_REORDER_INTRO: "ఇక్కడ మీ items ని review చేసి మళ్లీ order చేయడానికి కొత్త link ఉంది."
   },
   hi: {
     LANG_GATE_PROMPT: "डिफ़ॉल्ट भाषा English है।\n\nअगर आप दूसरी भाषा चाहते हैं तो 'Select language / भाषा' दबाएँ।",
@@ -339,7 +336,7 @@ export const messages = {
     DETAIL_HELP: "अधिक images के लिए 'more images', list पर लौटने के लिए 'browse', cart में जोड़ने के लिए 'add <SKU> <QTY>', category बदलने के लिए 'types' टाइप करें।",
     BUSINESS_PROMPT: "अपना business नाम reply करें (उदा: biz Mindsfire).",
     CONFIRM_HELP: "Order करने के लिए Confirm दबाएँ, रद्द करने के लिए Cancel दबाएँ।",
-    HELP_FALLBACK: "शुरू करने के लिए 'Wholesale' टाइप करें, या categories देखने के लिए 'types' टाइप करें। आप कभी भी 'help' टाइप कर सकते हैं।",
+    HELP_FALLBACK: "*क्या आपको अपने wholesale order के लिए मदद चाहिए?*\n\nआगे बढ़ने के लिए नीचे दिए गए विकल्पों का उपयोग करें:\n\n- *फिर से शुरू करें* – wholesale flow को शुरुआत से दोबारा शुरू करता है।\n- *भाषा बदलें* – WhatsApp बातचीत की भाषा बदलता है।\n- *सपोर्ट से संपर्क करें* – अटक जाने पर हमारी sales टीम से जुड़ने के लिए।\n\n_अगर समझ नहीं आ रहा कि क्या करना है, तो *फिर से शुरू करें* या *भाषा बदलें* चुनें, या *सपोर्ट से संपर्क करें* चुनें._",
     CHECKOUT_LINK_INTRO: "इस link से अपने items जाँचें, quantities confirm करें, business details जोड़ें और अपना wholesale order place करें:",
     WEB_CHECKOUT_SESSION_HEADER: "आप पहले से ही wholesale order वाले चरण में हैं।",
     WEB_CHECKOUT_SESSION_INFO: "आपके लिए wholesale buyer के रूप में पहले ही checkout link इसी चैट में भेज दिया गया है.\nअगर वह link expire हो गया है या आप दोबारा शुरू करना चाहते हैं तो 'start' टाइप करें, हम आपको नया link भेज देंगे.",
@@ -394,7 +391,10 @@ export const messages = {
     FALLBACK_START: "शुरू करने के लिए कोई भी message टाइप करें.",
     CATALOG_IMAGE_CAPTION: "{sku} | {title}\nPrice: {price} {currency}\nMOQ: {moq}\nType 'add {sku} <QTY>'",
     CATALOG_FOOTER: "'add <SKU> <QTY>' reply करके items को cart में जोड़ें, 'cart' से देखें, 'checkout' से order करें.",
-    BUTTON_START: "फिर से शुरू करें"
+    BUTTON_START: "फिर से शुरू करें",
+    BUTTON_CHANGE_LANGUAGE: "भाषा बदलें",
+    BUTTON_CONTACT_SUPPORT: "सपोर्ट से संपर्क करें",
+    CONTACT_SUPPORT_MESSAGE: "*सपोर्ट से संपर्क करें*\n\nअगर आपके wholesale order के लिए सहायता चाहिए, तो आप हमारी sales टीम से संपर्क कर सकते हैं:\n\n- Email: *connect.mansimpex@gmail.com*\n- Sales: *91871 17080*, *84960 07080*\n\n_ज़रूरत हो तो नीचे दिए गए विकल्पों से दोबारा शुरू कर सकते हैं या भाषा बदल सकते हैं._"
   },
   ml: {
     LANG_GATE_PROMPT: "Default ഭാഷ English ആണ്.\n\nമറ്റൊരു ഭാഷ വേണമെങ്കിൽ 'Select language / ഭാഷ' എന്ന ബട്ടൺ ഞെക്കുക.",
@@ -415,7 +415,7 @@ export const messages = {
     DETAIL_HELP: "കൂടുതൽ ചിത്രങ്ങൾക്ക് 'more images', list ലേക്ക് മടങ്ങാൻ 'browse', cart ൽ ചേർക്കാൻ 'add <SKU> <QTY>', category മാറ്റാൻ 'types' ഉപയോഗിക്കുക.",
     BUSINESS_PROMPT: "നിങ്ങളുടെ business പേര് reply ചെയ്യുക (ഉദാ: biz Mindsfire).",
     CONFIRM_HELP: "Order ചെയ്യാൻ Confirm അമർത്തുക, റദ്ദാക്കാൻ Cancel അമർത്തുക.",
-    HELP_FALLBACK: "ആരംഭിക്കാൻ 'Wholesale' എന്ന് type ചെയ്യുക, categories കാണാൻ 'types' ഉപയോഗിക്കുക. ഏത് സമയത്തും 'help' type ചെയ്യാം.",
+    HELP_FALLBACK: "*നിങ്ങളുടെ wholesale order ന് സഹായം വേണമോ?*\n\nതുടരാൻ താഴെയുള്ള ഓപ്ഷനുകൾ ഉപയോഗിക്കുക:\n\n- *വീണ്ടും ആരംഭിക്കുക* – wholesale flow നെ ആദ്യത്തിൽ നിന്ന് വീണ്ടും ആരംഭിക്കുന്നു.\n- *ഭാഷ മാറ്റുക* – WhatsApp സംഭാഷണത്തിന്റെ ഭാഷ മാറ്റുന്നു.\n- *സപ്പോർട്ടുമായി ബന്ധപ്പെടുക* – നിങ്ങൾ കുടുങ്ങിയാൽ നമ്മുടെ sales ടീമുമായി ബന്ധപ്പെടാൻ.\n\n_എന്ത് ചെയ്യണമെന്ന് ഉറപ്പില്ലെങ്കിൽ, *വീണ്ടും ആരംഭിക്കുക* അല്ലെങ്കിൽ *ഭാഷ മാറ്റുക* തിരഞ്ഞെടുക്കുക, അല്ലെങ്കിൽ *സപ്പോർട്ടുമായി ബന്ധപ്പെടുക* തിരഞ്ഞെടുക്കുക._",
     CHECKOUT_LINK_INTRO: "ഈ link ഉപയോഗിച്ച് നിങ്ങളുടെ items പരിശോധിച്ച്, quantities സ്ഥിരീകരിച്ച്, business വിശദാംശങ്ങൾ ചേർത്ത് നിങ്ങളുടെ wholesale order complete ചെയ്യൂ:",
     WEB_CHECKOUT_SESSION_HEADER: "നിങ്ങൾ ഇതിനകം wholesale order ഘട്ടത്തിലാണ്.",
     WEB_CHECKOUT_SESSION_INFO: "നിങ്ങളെ wholesale buyer ആയി ഇതിനകം സെറ്റ് ചെയ്ത് checkout link ഈ chat ൽ പങ്കുവെച്ചിട്ടുണ്ട്.\nആ link കാലഹരണപ്പെട്ടാൽ അല്ലെങ്കിൽ വീണ്ടും പുതുതായി തുടങ്ങാൻ 'start' എന്ന് type ചെയ്യൂ, ഞങ്ങൾ പുതിയ link അയക്കും.",
