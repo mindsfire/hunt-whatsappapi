@@ -8,7 +8,7 @@ import { google } from 'googleapis';
 import { Storage } from '@google-cloud/storage';
 import { Firestore } from '@google-cloud/firestore';
 import { t } from './locales.js';
-import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId } from './lib/wa.js';
+import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId, sendOrderReviewTemplate } from './lib/wa.js';
 import { makeCheckoutToken, verifyCheckoutToken, buildCheckoutUrl } from './lib/checkout.js';
 import { graphGet, fetchSets, fetchSetItems, fetchSetProductsDetailed, parsePriceToNumber } from './lib/graph.js';
 import { getOrCreateMediaIdForGcsPath } from './lib/media.js';
@@ -551,7 +551,14 @@ async function sendCheckoutLink(toWaId) {
       if (sess && (sess.language || sess.locale)) lang = sess.language || sess.locale;
     } catch (_) { /* ignore, fallback to en */ }
     const intro = t(lang, 'CHECKOUT_LINK_INTRO');
-    await sendText(toWaId, `${intro}\n${url}`);
+    // Prefer the approved WhatsApp template with deep link button.
+    // If the template send fails for any reason, fall back to the plain text link.
+    try {
+      await sendOrderReviewTemplate(toWaId, url);
+    } catch (_) {
+      // Fallback: send the original text + URL so user still gets a working link.
+      await sendText(toWaId, `${intro}\n${url}`);
+    }
   } catch (_) { /* non-fatal */ }
 }
 
@@ -1028,77 +1035,6 @@ async function handleMessage(waUserId, text, rawMsg) {
       { type: 'reply', reply: { id: 'mode_wholesale', title: wholesaleTitle } },
       { type: 'reply', reply: { id: 'mode_retail', title: retailTitle } }
     ]);
-  }
-
-  // Global cart view / checkout shortcuts (work from any state)
-  if (lower === 'cart' || lower === 'view cart') {
-    const cart = await dbGetCart(waUserId);
-    const items = cart.items || [];
-    const total = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    const lines = items.map(i => `• ${i.sku} x ${i.qty} = ${i.qty * i.unit_price}`);
-    if (!items.length) {
-      const msgEmpty = t(lang, 'CART_EMPTY');
-      return sendText(to, msgEmpty);
-    }
-    const header = t(lang, 'CART_HEADER');
-    const totalLine = t(lang, 'CART_TOTAL_LINE', { total });
-    return sendText(to, [header, ...lines, totalLine].join('\n'));
-  }
-  if (lower === 'checkout') {
-    const cartForCheckout = await dbGetCart(waUserId);
-    const cartItems = cartForCheckout.items || [];
-    if (!cartItems.length) {
-      const msgEmpty = t(lang, 'CART_EMPTY');
-      return sendText(to, msgEmpty);
-    }
-    if (!sess.business_name) {
-      sess.state = 'business_name';
-      await dbSaveSession(waUserId, sess);
-      return sendText(to, 'Please share your business name before placing the order.');
-    }
-    if (!sess.business_address) {
-      sess.state = 'business_address';
-      await dbSaveSession(waUserId, sess);
-      return sendText(to, 'Please share your full business address before placing the order.');
-    }
-    // Build confirm prompt
-    sess.business = { name: sess.business_name, address: sess.business_address };
-    sess.state = 'confirm';
-    await dbSaveSession(waUserId, sess);
-    const totalC = cartItems.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    const bodyC = t(lang, 'CONFIRM_BODY', { name: sess.business_name, total: totalC });
-    const yesTitleC = t(lang, 'BUTTON_CONFIRM');
-    const noTitleC = t(lang, 'BUTTON_CANCEL');
-    return sendButtons(to, bodyC, [
-      { type: 'reply', reply: { id: 'confirm_yes', title: yesTitleC } },
-      { type: 'reply', reply: { id: 'confirm_no', title: noTitleC } }
-    ]);
-  }
-
-  // When user is already in web checkout mode and sends any message (other than 'start',
-  // which is handled above), respond with a friendly, session-aware explanation
-  // formatted as Header (bold), Body, Footer (italic) plus helper buttons.
-  if (sess.state === 'web_checkout') {
-    const headerW = t(lang, 'WEB_CHECKOUT_SESSION_HEADER');
-    const bodyW = t(lang, 'WEB_CHECKOUT_SESSION_INFO');
-    const footerW = t(lang, 'WEB_CHECKOUT_SESSION_FOOTER');
-    const msgW = `*${headerW}*\n\n${bodyW}\n\n_${footerW}_`;
-    const startTitle = t(lang, 'BUTTON_START');
-    const changeLangTitle = t(lang, 'BUTTON_CHANGE_LANGUAGE');
-    const helpTitle = t(lang, 'BUTTON_HELP');
-    return sendButtons(to, msgW, [
-      { type: 'reply', reply: { id: 'web_restart', title: startTitle } },
-      { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
-      { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
-    ]);
-  }
-
-  if (lower === 'view' || lower === 'add to cart' || lower === 'add') {
-    const prefSku = (sess.selected_product && sess.selected_product.trim()) || (sess.last_browse_sku && sess.last_browse_sku.trim()) || '';
-    if (prefSku) {
-      if (lower === 'view') lower = `view ${prefSku}`;
-      else lower = `add ${prefSku} 1`;
-    }
   }
 
   // Global escape routes to avoid getting stuck
