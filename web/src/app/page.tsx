@@ -99,6 +99,12 @@ export default function Page() {
         // Ensure defaults
         const norm = its.map((it) => ({ ...it, qty: it.qty || 1 }));
         setItems(norm);
+
+        const biz = j.business || {};
+        setBizName((prev) => prev || (biz.name || ""));
+        setBizAddr((prev) => prev || (biz.address || ""));
+        setGstin((prev) => prev || (biz.gstin ? String(biz.gstin).toUpperCase() : ""));
+
         setLoading(false);
       })
       .catch((e) => {

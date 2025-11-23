@@ -1,7 +1,8 @@
-import { getSession as dbGetSession, getCart as dbGetCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
+import { getSession as dbGetSession, saveSession as dbSaveSession, getCart as dbGetCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
 import { getCheckoutTokenStatus } from '../lib/checkout.js';
 import { google } from 'googleapis';
-import { sendText } from '../lib/wa.js';
+import { sendButtons, sendText } from '../lib/wa.js';
+import { t } from '../locales.js';
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -14,12 +15,10 @@ function formatOrderItemsForSheet(items) {
     if (!name) continue;
     const size = (it.size || '').toString();
     const qty = Number(it.qty || 0) || 0;
-    const unitPrice = Number(it.unit_price || 0) || 0;
 
     let segment = name;
     if (size) segment += ' - ' + size;
     if (qty) segment += ' * ' + qty;
-    if (unitPrice) segment += ' at ' + unitPrice;
     parts.push(segment);
   }
   return parts.join(', ');
@@ -71,12 +70,13 @@ export function registerApiRoutes(app, adminDb) {
         if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
       }
 
-      let business = { name: '', address: '' };
+      let business = { name: '', address: '', gstin: '' };
       try {
         const sess = await dbGetSession(u);
         business = {
           name: sess?.business_name || sess?.business?.name || '',
-          address: sess?.business_address || sess?.business?.address || ''
+          address: sess?.business_address || sess?.business?.address || '',
+          gstin: sess?.business_gstin || sess?.business?.gstin || sess?.gstin || ''
         };
       } catch (_) {}
 
@@ -149,6 +149,21 @@ export function registerApiRoutes(app, adminDb) {
         gstin: (req.body?.business?.gstin || '').toString()
       };
 
+      try {
+        await dbSaveSession(u, {
+          business_name: business.name,
+          business_address: business.address,
+          business_gstin: business.gstin,
+          business: {
+            name: business.name,
+            address: business.address,
+            gstin: business.gstin
+          }
+        });
+      } catch (e) {
+        console.error('saveSession business update error', e);
+      }
+
       const id = 'ORD-' + Math.random().toString(36).slice(2, 10).toUpperCase();
       const order = { id, wa_user_id: u, business, items: outItems, currency, subtotal, created_at: nowIso(), source: 'web_checkout' };
 
@@ -157,8 +172,28 @@ export function registerApiRoutes(app, adminDb) {
 
       // Best-effort WhatsApp confirmation back to the user
       try {
-        const msg = `Your order has been placed successfully. Order ID: ${id}`;
-        await sendText(u, msg);
+        let lang = 'en';
+        try {
+          const sess = await dbGetSession(u);
+          if (sess && (sess.language || sess.locale)) lang = sess.language || sess.locale;
+        } catch (_) { }
+
+        const header = t(lang, 'ORDER_CONFIRM_HEADER');
+        const bodyText = t(lang, 'ORDER_CONFIRM_BODY', { id });
+        const footer = t(lang, 'ORDER_CONFIRM_FOOTER');
+        const fullMsg = `${header}\n\n${bodyText}\n\n${footer}`;
+        await sendText(u, fullMsg);
+
+        const orderAgainTitle = t(lang, 'BUTTON_ORDER_AGAIN') || 'Order again';
+        const contactSupportTitle = t(lang, 'BUTTON_CONTACT_SUPPORT');
+        const helpTitle = t(lang, 'BUTTON_HELP');
+        const nextStepsBody = t(lang, 'NEXT_STEPS_TITLE') || 'Next steps';
+
+        await sendButtons(u, nextStepsBody, [
+          { type: 'reply', reply: { id: 'web_restart', title: orderAgainTitle } },
+          { type: 'reply', reply: { id: 'contact_support', title: contactSupportTitle } },
+          { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+        ]);
       } catch (e) {
         console.error('send WA order confirmation error', e);
       }
