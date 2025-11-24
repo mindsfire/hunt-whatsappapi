@@ -3,6 +3,7 @@ import { fetchSets, fetchSetProductsDetailed } from '../lib/graph.js';
 import { getOrCreateMediaIdForGcsPath } from '../lib/media.js';
 import { sendImageByMediaId } from '../lib/wa.js';
 import { Storage } from '@google-cloud/storage';
+import multer from 'multer';
 import { upsertCatalogItems } from '../firestore.js';
 
 const SYNC_SHARED_SECRET = process.env.SYNC_SHARED_SECRET || '';
@@ -17,6 +18,11 @@ const MEDIA_BUCKET = process.env.MEDIA_BUCKET || '';
 const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/+$/g, '');
 
 const storage = new Storage();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 }
+});
 
 function nowIso() { return new Date().toISOString(); }
 
@@ -185,6 +191,84 @@ export function registerAdminRoutes(app, adminDb) {
       return res.status(200).json({ ok: true, counts: { imported: importedCount, indian: indianCount }, lastSyncAt: syncAt });
     } catch (e) {
       console.error('sync-from-cm error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: Upload product images (replace images array) ---
+  app.post('/admin/product-images-upload', upload.array('images', 10), async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+      if (!MEDIA_BUCKET) return res.status(500).json({ ok: false, error: 'MEDIA_BUCKET not configured' });
+
+      const body = req.body || {};
+      const rawSku = (body.sku || '').toString().trim();
+      if (!rawSku) return res.status(400).json({ ok: false, error: 'sku required' });
+      const sku = rawSku.toLowerCase();
+
+      const files = Array.isArray(req.files) ? req.files : [];
+      if (!files.length) return res.status(400).json({ ok: false, error: 'no images provided' });
+
+      const doc = await adminDb.collection('products').doc(sku).get();
+      const existing = doc.exists ? doc.data() || {} : {};
+      const typeKey = (existing.type || 'misc').toString().toLowerCase() || 'misc';
+
+      const bucket = storage.bucket(MEDIA_BUCKET);
+      const basePrefix = MEDIA_BASE_PREFIX ? `${MEDIA_BASE_PREFIX}/admin` : 'admin';
+      const images = [];
+
+      let index = 1;
+      for (const f of files) {
+        const fileObj = f || {};
+        const originalName = (fileObj.originalname || 'image').toString();
+        const mime = (fileObj.mimetype || 'image/jpeg').toString();
+        let ext = 'jpg';
+        if (mime.includes('png')) ext = 'png';
+        else if (mime.includes('webp')) ext = 'webp';
+        else if (mime.includes('jpeg')) ext = 'jpg';
+        else if (originalName.toLowerCase().endsWith('.png')) ext = 'png';
+        else if (originalName.toLowerCase().endsWith('.webp')) ext = 'webp';
+
+        const objectName = `${basePrefix}/${typeKey}/${sku}/${index}.${ext}`;
+        const fileRef = bucket.file(objectName);
+        const buf = fileObj.buffer;
+        await fileRef.save(buf, { contentType: mime, resumable: false, public: true });
+        images.push(`gs://${MEDIA_BUCKET}/${objectName}`);
+        index++;
+      }
+
+      await adminDb.collection('products').doc(sku).set(
+        {
+          images,
+          hero_image_index: 0,
+          updated_at: nowIso(),
+        },
+        { merge: true }
+      );
+
+      // Best-effort update of products_by_type hero_url and image_count
+      if (existing.type) {
+        const typeRef = adminDb.collection('products_by_type').doc(existing.type);
+        const typeDoc = await typeRef.get();
+        if (typeDoc.exists) {
+          const data = typeDoc.data() || {};
+          const items = Array.isArray(data.items)
+            ? data.items.map((it) =>
+                (it && it.sku === sku.toUpperCase()) || (it && (it.sku || '').toString().toLowerCase() === sku)
+                  ? { ...it, hero_url: images[0] || '', image_count: images.length }
+                  : it
+              )
+            : [];
+          await typeRef.set({ ...data, items, updated_at: nowIso() }, { merge: true });
+        }
+      }
+
+      return res.status(200).json({ ok: true, image_count: images.length });
+    } catch (e) {
+      console.error('product-images-upload error', e);
       return res.status(200).json({ ok: false, error: String(e) });
     }
   });
@@ -401,6 +485,204 @@ export function registerAdminRoutes(app, adminDb) {
       return res.status(200).send(csv);
     } catch (e) {
       console.error('export-products-csv error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: Upsert product (basic catalog editing) ---
+  app.post('/admin/product-upsert', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+
+      const body = req.body || {};
+      const rawSku = (body.sku || '').toString().trim();
+      if (!rawSku) return res.status(400).json({ ok: false, error: 'sku required' });
+      const sku = rawSku.toLowerCase();
+
+      const title = (body.title || '').toString().trim() || sku.toUpperCase();
+      const type = (body.type || '').toString().trim().toLowerCase();
+      const priceNum = Number(body.price || 0) || 0;
+      const active = body.active === false ? false : true;
+      const pcsPerSetNum = Number(body.pcs_per_set || 0) || 0;
+      const description = (body.description || '').toString();
+
+      let sizesArr = [];
+      if (Array.isArray(body.sizes)) {
+        sizesArr = body.sizes.map((s) => (s || '').toString().trim()).filter(Boolean);
+      } else if (typeof body.sizes === 'string') {
+        sizesArr = body.sizes
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+
+      const ref = adminDb.collection('products').doc(sku);
+      await ref.set(
+        {
+          sku,
+          title,
+          type,
+          price: priceNum,
+          currency: 'INR',
+          sizes: sizesArr,
+          pcs_per_set: pcsPerSetNum,
+          description,
+          active,
+          updated_at: nowIso(),
+        },
+        { merge: true }
+      );
+
+      // Best-effort update of products_by_type index so new/edited products show in browse list
+      try {
+        if (type) {
+          const typeKey = type;
+          const snap = await ref.get();
+          const pd = snap.exists ? snap.data() || {} : {};
+          const typeRef = adminDb.collection('products_by_type').doc(typeKey);
+          const typeSnap = await typeRef.get();
+          const tData = typeSnap.exists ? typeSnap.data() || {} : {};
+          const oldItems = Array.isArray(tData.items) ? tData.items : [];
+          const images = Array.isArray(pd.images) ? pd.images : [];
+          const heroIdx = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
+          const hero = images[heroIdx] || '';
+          const skuUpper = (pd.sku || sku).toString().toUpperCase();
+          const filtered = oldItems.filter((it) => {
+            const itSku = (it && it.sku) ? it.sku.toString() : '';
+            return itSku.toLowerCase() !== sku;
+          });
+          const newItem = {
+            sku: skuUpper,
+            title: pd.title || skuUpper,
+            hero_url: hero,
+            image_count: images.length,
+          };
+          const items = [...filtered, newItem];
+          await typeRef.set({ ...tData, type: typeKey, items, updated_at: nowIso() }, { merge: true });
+        }
+      } catch (e) {
+        console.error('product-upsert: failed to update products_by_type', { sku, type, error: e });
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      console.error('product-upsert error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: Delete product (catalog + images) ---
+  app.post('/admin/product-delete', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+
+      const body = req.body || {};
+      const rawSku = (body.sku || '').toString().trim();
+      if (!rawSku) return res.status(400).json({ ok: false, error: 'sku required' });
+      const sku = rawSku.toLowerCase();
+
+      const docRef = adminDb.collection('products').doc(sku);
+      const docSnap = await docRef.get();
+      if (!docSnap.exists) {
+        return res.status(200).json({ ok: true, deleted: false });
+      }
+
+      const data = docSnap.data() || {};
+      const typeKey = (data.type || '').toString().toLowerCase();
+      const images = Array.isArray(data.images) ? data.images : [];
+
+      // Best-effort delete any GCS images that belong to this product
+      if (MEDIA_BUCKET && images.length) {
+        const bucket = storage.bucket(MEDIA_BUCKET);
+        for (const u of images) {
+          if (!u || typeof u !== 'string') continue;
+          let objectName = '';
+          if (u.startsWith('gs://')) {
+            const without = u.slice('gs://'.length);
+            const idx = without.indexOf('/');
+            if (idx > 0) {
+              const bucketName = without.slice(0, idx);
+              const obj = without.slice(idx + 1);
+              if (bucketName === MEDIA_BUCKET) objectName = obj;
+            }
+          } else if (!u.startsWith('http://') && !u.startsWith('https://')) {
+            objectName = u.replace(/^\/+/, '');
+          }
+          if (!objectName) continue;
+          try {
+            await bucket.file(objectName).delete();
+          } catch (e) {
+            console.error('product-delete: failed to delete image', { sku, objectName, error: e });
+          }
+        }
+      }
+
+      await docRef.delete();
+
+      // Remove from products_by_type items list
+      if (typeKey) {
+        try {
+          const typeRef = adminDb.collection('products_by_type').doc(typeKey);
+          const typeSnap = await typeRef.get();
+          if (typeSnap.exists) {
+            const tData = typeSnap.data() || {};
+            const oldItems = Array.isArray(tData.items) ? tData.items : [];
+            const skuLower = sku.toLowerCase();
+            const skuUpper = sku.toUpperCase();
+            const items = oldItems.filter((it) => {
+              const itSku = (it && it.sku) ? it.sku.toString() : '';
+              const l = itSku.toLowerCase();
+              return l !== skuLower && itSku !== skuUpper;
+            });
+            await typeRef.set({ ...tData, items, updated_at: nowIso() }, { merge: true });
+          }
+        } catch (e) {
+          console.error('product-delete: failed to update products_by_type', { sku, typeKey, error: e });
+        }
+      }
+
+      return res.status(200).json({ ok: true, deleted: true });
+    } catch (e) {
+      console.error('product-delete error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // --- Admin: List products for catalog UI (read-only) ---
+  app.get('/admin/products-list', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+      const snap = await adminDb.collection('products').get();
+      const items = [];
+      for (const d of snap.docs) {
+        const p = d.data() || {};
+        const images = Array.isArray(p.images) ? p.images : [];
+        items.push({
+          sku: p.sku || d.id,
+          title: p.title || '',
+          type: p.type || '',
+          price: p.price || '',
+          currency: (p.currency || 'INR').toString(),
+          image_count: images.length,
+          sizes: Array.isArray(p.sizes) ? p.sizes : [],
+          pcs_per_set: Number(p.pcs_per_set || 0) || 0,
+          description: (p.description || '').toString(),
+          active: p.active === false ? false : true,
+          updated_at: p.updated_at || null,
+        });
+      }
+      return res.status(200).json({ ok: true, items });
+    } catch (e) {
+      console.error('products-list error', e);
       return res.status(200).json({ ok: false, error: String(e) });
     }
   });
