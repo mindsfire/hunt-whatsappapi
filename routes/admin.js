@@ -13,7 +13,39 @@ const WA_SET_INDIAN_ID = process.env.WA_SET_INDIAN_ID || '';
 const WA_SET_IMPORTED_NAME = process.env.WA_SET_IMPORTED_NAME || 'Imported brands';
 const WA_SET_INDIAN_NAME = process.env.WA_SET_INDIAN_NAME || 'Indian brands';
 
+const MEDIA_BUCKET = process.env.MEDIA_BUCKET || '';
+const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/+$/g, '');
+
+const storage = new Storage();
+
 function nowIso() { return new Date().toISOString(); }
+
+function buildCatalogObjectName(typeKey, sku, index) {
+  const base = MEDIA_BASE_PREFIX ? `${MEDIA_BASE_PREFIX}/cm` : 'cm';
+  return `${base}/${typeKey}/${sku}/${index}.jpg`;
+}
+
+async function mirrorImageToGcs(srcUrl, typeKey, sku, index) {
+  if (!MEDIA_BUCKET || !srcUrl) return null;
+  try {
+    const res = await fetch(srcUrl);
+    if (!res.ok) {
+      console.error('mirrorImageToGcs: fetch failed', { srcUrl, status: res.status });
+      return null;
+    }
+    const arrayBuf = await res.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
+    const objectName = buildCatalogObjectName(typeKey, sku, index);
+    const bucket = storage.bucket(MEDIA_BUCKET);
+    const file = bucket.file(objectName);
+    const contentType = res.headers.get('content-type') || 'image/jpeg';
+    await file.save(buf, { contentType, resumable: false, public: true });
+    return `gs://${MEDIA_BUCKET}/${objectName}`;
+  } catch (e) {
+    console.error('mirrorImageToGcs: error', { srcUrl, error: e });
+    return null;
+  }
+}
 
 function parseDescriptionAndSizes(descRaw) {
   const desc = (descRaw || '').toString();
@@ -92,7 +124,18 @@ export function registerAdminRoutes(app, adminDb) {
         for (const p of arr) {
           const sku = String(p.retailer_id || '').toLowerCase();
           if (!sku) continue;
-          const images = [p.image_url, ...(Array.isArray(p.additional_image_urls) ? p.additional_image_urls : [])].filter(Boolean);
+          const srcImages = [p.image_url, ...(Array.isArray(p.additional_image_urls) ? p.additional_image_urls : [])].filter(Boolean);
+          let images = [];
+          if (srcImages.length && MEDIA_BUCKET) {
+            const mirrored = [];
+            for (let i = 0; i < srcImages.length; i++) {
+              const m = await mirrorImageToGcs(srcImages[i], typeKey, sku, i + 1);
+              if (m) mirrored.push(m);
+            }
+            images = mirrored.length ? mirrored : srcImages;
+          } else {
+            images = srcImages;
+          }
           const heroIdx = 0;
           const parsed = parseDescriptionAndSizes(p.description);
           const prodDoc = {

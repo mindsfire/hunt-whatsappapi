@@ -6,6 +6,20 @@ import { t } from '../locales.js';
 
 function nowIso() { return new Date().toISOString(); }
 
+function normalizeImageUrl(u) {
+  if (!u || typeof u !== 'string') return u;
+  if (u.startsWith('gs://')) {
+    const without = u.slice('gs://'.length);
+    const idx = without.indexOf('/');
+    if (idx > 0) {
+      const bucket = without.slice(0, idx);
+      const object = without.slice(idx + 1);
+      return `https://storage.googleapis.com/${bucket}/${object}`;
+    }
+  }
+  return u;
+}
+
 function formatOrderItemsForSheet(items) {
   if (!Array.isArray(items) || !items.length) return '';
   const parts = [];
@@ -89,7 +103,8 @@ export function registerApiRoutes(app, adminDb) {
           if (!sku) continue;
           const pd = await getProductDoc(adminDb, sku);
           if (!pd) continue;
-          const images = Array.isArray(pd.images) ? pd.images : [];
+          const rawImages = Array.isArray(pd.images) ? pd.images : [];
+          const images = rawImages.map(normalizeImageUrl);
           const heroIdx = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
           const image_url = images[heroIdx] || '';
           const price = Number(pd.price || ci.unit_price || 0) || 0;
@@ -241,7 +256,8 @@ export function registerApiRoutes(app, adminDb) {
         if (!sku) continue;
         const pd = await getProductDoc(adminDb, sku).catch(() => null);
         if (!pd) continue;
-        const images = Array.isArray(pd.images) ? pd.images : [];
+        const rawImages = Array.isArray(pd.images) ? pd.images : [];
+        const images = rawImages.map(normalizeImageUrl);
         const heroIdx = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
         const image_url = images[heroIdx] || '';
         const price = Number(pd.price || 0) || 0;
@@ -275,7 +291,8 @@ export function registerApiRoutes(app, adminDb) {
 
       const pd = await getProductDoc(adminDb, id);
       if (!pd) return res.status(404).json({ ok: false, error: 'not found' });
-      const images = Array.isArray(pd.images) ? pd.images : [];
+      const rawImages = Array.isArray(pd.images) ? pd.images : [];
+      const images = rawImages.map(normalizeImageUrl);
       const hero_image_index = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
       const pcs_per_set = Number(pd.pcs_per_set || 0) || 0;
       const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
