@@ -276,28 +276,54 @@ export default function Page() {
       <div
         style={{
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          margin: "32px 0 32px",
-          gap: 16,
+          margin: "8px 0 32px",
         }}
       >
         <img
-          src="/checkout/hunt-logo.jpg"
-          alt="Hunt Wholesale"
-          style={{ height: 160, maxWidth: 280, objectFit: "contain" }}
+          src="/checkout/hunt-logo-rectangular.jpg"
+          alt="Mans Impex logo"
+          style={{ height: 52, maxWidth: 260, objectFit: "contain", display: "block", marginBottom: 16 }}
         />
         <div
           style={{
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            lineHeight: 1.1,
+            lineHeight: 1.2,
             textAlign: "center",
           }}
         >
-          <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "Poppins, system-ui, -apple-system, sans-serif" }}>Wholesale</div>
-          <div style={{ fontSize: 13, fontStyle: "italic", opacity: 0.75, fontFamily: "Poppins, system-ui, -apple-system, sans-serif" }}>Fabric Dealers</div>
+          <div
+            style={{
+              fontSize: 26,
+              fontWeight: 700,
+              fontFamily: "Poppins, system-ui, -apple-system, sans-serif",
+            }}
+          >
+            Mans Impex
+          </div>
+          <div
+            style={{
+              fontSize: 13,
+              marginTop: 4,
+              fontFamily: "Poppins, system-ui, -apple-system, sans-serif",
+            }}
+          >
+            Manufacturer | Exporters
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              marginTop: 2,
+              opacity: 0.85,
+              fontFamily: "Poppins, system-ui, -apple-system, sans-serif",
+            }}
+          >
+            Shirts, T-Shirts, Trousers & Sportswear
+          </div>
         </div>
       </div>
       {!waId || !token ? (
@@ -521,7 +547,7 @@ export default function Page() {
               value={bizName}
               onChange={(e) => setBizName(e.target.value)}
               maxLength={40}
-              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: bizError && (!bizName.trim() || !/^[A-Za-z\s]+$/.test(bizName.trim())) ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#1f2937", color: "#ffffff", border: bizError && (!bizName.trim() || !/^[A-Za-z\s]+$/.test(bizName.trim())) ? "1px solid #b91c1c" : "1px solid #9ca3af", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
             />
             {bizError && !bizName.trim() && (
               <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 4 }}>Business Name is required</div>
@@ -534,7 +560,7 @@ export default function Page() {
               value={gstin}
               onChange={(e) => setGstin(e.target.value.toUpperCase())}
               maxLength={20}
-              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: gstError ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#1f2937", color: "#ffffff", border: gstError ? "1px solid #b91c1c" : "1px solid #9ca3af", borderRadius: 6, marginBottom: 4, fontSize: 14, lineHeight: "1.4" }}
             />
             {gstError && (
               <div style={{ color: "#fca5a5", fontSize: 12, marginBottom: 4 }}>{gstError}</div>
@@ -545,7 +571,7 @@ export default function Page() {
               onChange={(e) => setBizAddr(e.target.value)}
               rows={4}
               maxLength={200}
-              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#111", color: "#eaeaea", border: bizError && !bizAddr.trim() ? "1px solid #b91c1c" : "1px solid #333", borderRadius: 6, fontSize: 14, lineHeight: "1.4" }}
+              style={{ width: "100%", boxSizing: "border-box", padding: 11, background: "#1f2937", color: "#ffffff", border: bizError && !bizAddr.trim() ? "1px solid #b91c1c" : "1px solid #9ca3af", borderRadius: 6, fontSize: 14, lineHeight: "1.4" }}
             />
             {bizError && !bizAddr.trim() && (
               <div style={{ color: "#fca5a5", fontSize: 12, marginTop: 4 }}>Delivery Address is required</div>
@@ -562,8 +588,19 @@ export default function Page() {
       )}
 
       {/* Company footer */}
-      <div style={{ marginTop: 32, padding: "16px 12px 24px", borderTop: "1px solid #222", fontSize: 12, lineHeight: 1.5, color: "#9ca3af", textAlign: "center" }}>
-        <div style={{ fontWeight: 600, color: "#e5e5e5", marginBottom: 4 }}>Mans Impex - Wholesale Dealers</div>
+      <div
+        style={{
+          marginTop: 32,
+          padding: "16px 12px 24px",
+          borderTop: "1px solid #222",
+          fontSize: 12,
+          lineHeight: 1.5,
+          color: "#9ca3af",
+          textAlign: "center",
+        }}
+      >
+        <div style={{ fontWeight: 600, color: "#e5e5e5", marginBottom: 2 }}>Mans Impex</div>
+        <div style={{ marginBottom: 6 }}>Manufacturer | Exporters – Shirts, T-Shirts, Trousers & Sportswear</div>
         <div style={{ marginBottom: 6 }}>GST - 29HCSPS6716N1ZA</div>
         <div>Reg Address: Ward No 17, Assessment No 10323, Kalenahalli Hosa Badavane</div>
         <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>

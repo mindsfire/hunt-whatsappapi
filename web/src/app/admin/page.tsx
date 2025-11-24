@@ -94,44 +94,53 @@ export default function AdminPage() {
       <div
         style={{
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          margin: "32px 0 32px",
-          gap: 16,
+          margin: "8px 0 32px",
         }}
       >
         <img
-          src="/checkout/hunt-logo.jpg"
-          alt="Hunt Wholesale"
-          style={{ height: 160, maxWidth: 280, objectFit: "contain" }}
+          src="/checkout/hunt-logo-rectangular.jpg"
+          alt="Mans Impex logo"
+          style={{ height: 52, maxWidth: 260, objectFit: "contain", display: "block", marginBottom: 16 }}
         />
         <div
           style={{
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            lineHeight: 1.1,
+            lineHeight: 1.2,
             textAlign: "center",
           }}
         >
           <div
             style={{
-              fontSize: 24,
+              fontSize: 26,
               fontWeight: 700,
               fontFamily: "Poppins, system-ui, -apple-system, sans-serif",
             }}
           >
-            Wholesale
+            Mans Impex
           </div>
           <div
             style={{
               fontSize: 13,
-              fontStyle: "italic",
-              opacity: 0.75,
+              marginTop: 4,
               fontFamily: "Poppins, system-ui, -apple-system, sans-serif",
             }}
           >
-            Fabric Dealers
+            Manufacturer | Exporters
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              marginTop: 2,
+              opacity: 0.85,
+              fontFamily: "Poppins, system-ui, -apple-system, sans-serif",
+            }}
+          >
+            Shirts, T-Shirts, Trousers & Sportswear
           </div>
         </div>
       </div>
@@ -283,9 +292,8 @@ export default function AdminPage() {
           textAlign: "center",
         }}
       >
-        <div style={{ fontWeight: 600, color: "#e5e5e5", marginBottom: 4 }}>
-          Mans Impex - Wholesale Dealers
-        </div>
+        <div style={{ fontWeight: 600, color: "#e5e5e5", marginBottom: 2 }}>Mans Impex</div>
+        <div style={{ marginBottom: 6 }}>Manufacturer | Exporters – Shirts, T-Shirts, Trousers & Sportswear</div>
         <div style={{ marginBottom: 6 }}>GST - 29HCSPS6716N1ZA</div>
         <div>Reg Address: Ward No 17, Assessment No 10323, Kalenahalli Hosa Badavane</div>
         <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>
