@@ -383,38 +383,16 @@ export default function AdminPage() {
         >
           <div style={{ marginBottom: 12, textAlign: "left" }}>
             <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>
-              Admin: Sync Commerce Manager
+              Admin: Catalog manager
             </div>
             <div style={{ fontSize: 13, opacity: 0.9 }}>
-              This tool pulls products from WhatsApp Commerce Manager and updates the
-              Hunt Wholesale catalog in Firestore.
+              Use this page to manage the web catalog stored in Firestore.
             </div>
           </div>
 
-          <div
-            style={{
-              fontSize: 13,
-              opacity: 0.9,
-              background: "#020617",
-              borderRadius: 8,
-              border: "1px solid #1f2937",
-              padding: 12,
-              marginBottom: 12,
-              textAlign: "left",
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>What this sync does</div>
-            <ul style={{ paddingLeft: 18, margin: 0, lineHeight: 1.5 }}>
-              <li>Fetches products from your configured Imported and Indian sets.</li>
-              <li>Updates the Firestore <code>products</code> collection (price, title, sizes, pcs per set, images).</li>
-              <li>Refreshes the <code>products_by_type</code> index used by the web checkout.</li>
-              <li>Does not delete existing products; it only upserts based on SKU.</li>
-            </ul>
-          </div>
-
-          <form onSubmit={handleSync} style={{ textAlign: "left" }}>
+          <div style={{ textAlign: "left", marginTop: 8 }}>
             <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
-              Sync password (shared secret)
+              Admin password (shared secret)
             </label>
             <input
               type="password"
@@ -430,76 +408,12 @@ export default function AdminPage() {
                 background: "#020617",
                 color: "#e5e7eb",
                 fontSize: 14,
-                marginBottom: 10,
+                marginBottom: 6,
               }}
             />
-
-            {error && (
-              <div
-                style={{
-                  marginBottom: 8,
-                  padding: 8,
-                  borderRadius: 6,
-                  background: "#451a1a",
-                  border: "1px solid #b91c1c",
-                  color: "#fecaca",
-                  fontSize: 12,
-                }}
-              >
-                {error}
-              </div>
-            )}
-
-            {lastResult && (
-              <div
-                style={{
-                  marginBottom: 8,
-                  padding: 8,
-                  borderRadius: 6,
-                  background: "#022c22",
-                  border: "1px solid #16a34a",
-                  color: "#bbf7d0",
-                  fontSize: 12,
-                }}
-              >
-                {lastResult}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || !secret}
-              style={{
-                marginTop: 4,
-                padding: "10px 22px",
-                background: loading ? "#15803d" : "#16a34a",
-                color: "white",
-                border: 0,
-                borderRadius: 6,
-                cursor: loading || !secret ? "default" : "pointer",
-                fontSize: 14,
-                fontWeight: 600,
-                opacity: loading || !secret ? 0.8 : 1,
-              }}
-            >
-              {loading ? "Syncing…" : "Sync catalogs"}
-            </button>
-          </form>
-
-          <div
-            style={{
-              marginTop: 12,
-              fontSize: 12,
-              opacity: 0.9,
-              textAlign: "left",
-            }}
-          >
-            <div>
-              <b>Last synced:</b> {relativeLastSynced}
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              Enter the shared secret to load and edit products in the web catalog.
             </div>
-            {lastSyncedAt && (
-              <div style={{ opacity: 0.8 }}>Exact time: {new Date(lastSyncedAt).toLocaleString()}</div>
-            )}
           </div>
 
           {/* Catalog (read-only) */}

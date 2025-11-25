@@ -1,5 +1,4 @@
 import { google } from 'googleapis';
-import { fetchSets, fetchSetProductsDetailed } from '../lib/graph.js';
 import { getOrCreateMediaIdForGcsPath } from '../lib/media.js';
 import { sendImageByMediaId } from '../lib/wa.js';
 import { Storage } from '@google-cloud/storage';
@@ -7,13 +6,6 @@ import multer from 'multer';
 import { upsertCatalogItems } from '../firestore.js';
 
 const SYNC_SHARED_SECRET = process.env.SYNC_SHARED_SECRET || '';
-const WA_GRAPH_TOKEN = process.env.WA_GRAPH_TOKEN || process.env.WA_CATALOG_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '';
-const WA_CATALOG_ID = process.env.WA_CATALOG_ID || '';
-const WA_SET_IMPORTED_ID = process.env.WA_SET_IMPORTED_ID || '';
-const WA_SET_INDIAN_ID = process.env.WA_SET_INDIAN_ID || '';
-const WA_SET_IMPORTED_NAME = process.env.WA_SET_IMPORTED_NAME || 'Imported brands';
-const WA_SET_INDIAN_NAME = process.env.WA_SET_INDIAN_NAME || 'Indian brands';
-
 const MEDIA_BUCKET = process.env.MEDIA_BUCKET || '';
 const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/+$/g, '');
 
@@ -23,178 +15,9 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 10 }
 });
-
 function nowIso() { return new Date().toISOString(); }
 
-function buildCatalogObjectName(typeKey, sku, index) {
-  const base = MEDIA_BASE_PREFIX ? `${MEDIA_BASE_PREFIX}/cm` : 'cm';
-  return `${base}/${typeKey}/${sku}/${index}.jpg`;
-}
-
-async function mirrorImageToGcs(srcUrl, typeKey, sku, index) {
-  if (!MEDIA_BUCKET || !srcUrl) return null;
-  try {
-    const res = await fetch(srcUrl);
-    if (!res.ok) {
-      console.error('mirrorImageToGcs: fetch failed', { srcUrl, status: res.status });
-      return null;
-    }
-    const arrayBuf = await res.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-    const objectName = buildCatalogObjectName(typeKey, sku, index);
-    const bucket = storage.bucket(MEDIA_BUCKET);
-    const file = bucket.file(objectName);
-    const contentType = res.headers.get('content-type') || 'image/jpeg';
-    await file.save(buf, { contentType, resumable: false, public: true });
-    return `gs://${MEDIA_BUCKET}/${objectName}`;
-  } catch (e) {
-    console.error('mirrorImageToGcs: error', { srcUrl, error: e });
-    return null;
-  }
-}
-
-function parseDescriptionAndSizes(descRaw) {
-  const desc = (descRaw || '').toString();
-
-  // Try to find patterns like:
-  //  "Available in sizes: M, L, XL, 2XL" or "Sizes: M,L,XL,2XL"
-  const m = desc.match(/available in sizes\s*:?\s*([A-Za-z0-9,\s]+)/i) ||
-            desc.match(/sizes\s*:?\s*([A-Za-z0-9,\s]+)/i);
-
-  // Parse sizes list if present
-  let sizes = [];
-  let cleanDesc = desc;
-  if (m) {
-    const sizesPart = m[1] || '';
-    sizes = sizesPart
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    // Remove the matched "sizes" segment from the description for cleaner display
-    cleanDesc = desc.replace(m[0], '').replace(/\s*\|\s*$/, '').trim();
-  }
-
-  // Parse pcs per set from patterns like "8 Pcs set" / "8 pcs set"
-  let pcsPerSet = 0;
-  // Support variants like:
-  //  "8 Pcs set", "8 pcs", "8pc set", "8pcs", "8 pieces set"
-  //  with or without space before/after the unit and optional "set" word.
-  const pcsMatch = desc.match(/(\d+)\s*(pc|pcs?|pieces?)\b(?:\s*set)?/i);
-  if (pcsMatch) {
-    const n = parseInt(pcsMatch[1], 10);
-    if (Number.isFinite(n) && n > 0) pcsPerSet = n;
-  }
-
-  return { description: cleanDesc, sizes, pcs_per_set: pcsPerSet };
-}
-
 export function registerAdminRoutes(app, adminDb) {
-  // --- Admin: Sync products from Commerce Manager (Catalog) into Firestore ---
-  // Usage: GET /admin/sync-from-cm
-  // Auth: header X-Shared-Secret must equal SYNC_SHARED_SECRET if set
-  app.get('/admin/sync-from-cm', async (req, res) => {
-    try {
-      if (SYNC_SHARED_SECRET) {
-        const token = req.get('X-Shared-Secret') || '';
-        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
-      }
-      if (!WA_GRAPH_TOKEN || !WA_CATALOG_ID) {
-        return res.status(400).json({ ok: false, error: 'WA_GRAPH_TOKEN and WA_CATALOG_ID required' });
-      }
-
-      async function resolveSetIdByName(name) {
-        const sets = await fetchSets();
-        const found = sets.find(s => (s.name || '').toLowerCase() === String(name || '').toLowerCase());
-        return (found && found.id) || '';
-      }
-
-      let importedSetId = WA_SET_IMPORTED_ID;
-      if (!importedSetId && WA_SET_IMPORTED_NAME) importedSetId = await resolveSetIdByName(WA_SET_IMPORTED_NAME);
-      let indianSetId = WA_SET_INDIAN_ID;
-      if (!indianSetId && WA_SET_INDIAN_NAME) indianSetId = await resolveSetIdByName(WA_SET_INDIAN_NAME);
-
-      const [imported, indian] = await Promise.all([
-        importedSetId ? fetchSetProductsDetailed(importedSetId) : Promise.resolve([]),
-        indianSetId ? fetchSetProductsDetailed(indianSetId) : Promise.resolve([])
-      ]);
-
-      const types = [];
-      const productsByType = {};
-      const batch = adminDb.batch();
-
-      async function upsertType(typeKey, arr) {
-        if (!arr || !arr.length) return;
-        types.push(typeKey);
-        const itemsMini = [];
-        for (const p of arr) {
-          const sku = String(p.retailer_id || '').toLowerCase();
-          if (!sku) continue;
-          const srcImages = [p.image_url, ...(Array.isArray(p.additional_image_urls) ? p.additional_image_urls : [])].filter(Boolean);
-          let images = [];
-          if (srcImages.length && MEDIA_BUCKET) {
-            const mirrored = [];
-            for (let i = 0; i < srcImages.length; i++) {
-              const m = await mirrorImageToGcs(srcImages[i], typeKey, sku, i + 1);
-              if (m) mirrored.push(m);
-            }
-            images = mirrored.length ? mirrored : srcImages;
-          } else {
-            images = srcImages;
-          }
-          const heroIdx = 0;
-          const parsed = parseDescriptionAndSizes(p.description);
-          const prodDoc = {
-            sku,
-            type: typeKey,
-            title: p.name || sku.toUpperCase(),
-            description: parsed.description,
-            sizes: parsed.sizes,
-            pcs_per_set: parsed.pcs_per_set || 0,
-            price: Number(p.price || 0) || 0,
-            currency: (p.currency || 'INR').toUpperCase(),
-            images,
-            hero_image_index: heroIdx,
-            active: true,
-            updated_at: nowIso()
-          };
-          const ref = adminDb.collection('products').doc(sku);
-          batch.set(ref, prodDoc, { merge: true });
-          itemsMini.push({ sku, title: prodDoc.title, hero_url: images[heroIdx] || '', image_count: images.length });
-        }
-        productsByType[typeKey] = itemsMini;
-        const refType = adminDb.collection('products_by_type').doc(typeKey);
-        batch.set(refType, { type: typeKey, items: itemsMini, updated_at: nowIso() }, { merge: true });
-      }
-
-      await upsertType('imported', imported);
-      await upsertType('indian', indian);
-
-      const cfgRef = adminDb.collection('config').doc('types');
-      if (types.length) batch.set(cfgRef, { types, updated_at: nowIso() }, { merge: true });
-
-      await batch.commit();
-
-      const importedCount = (imported || []).length;
-      const indianCount = (indian || []).length;
-      const syncAt = nowIso();
-      try {
-        const syncRef = adminDb.collection('config').doc('sync_from_cm');
-        await syncRef.set({
-          last_sync_at: syncAt,
-          last_counts: { imported: importedCount, indian: indianCount }
-        }, { merge: true });
-      } catch (e) {
-        console.error('sync-from-cm: failed to persist sync metadata', e);
-      }
-
-      return res.status(200).json({ ok: true, counts: { imported: importedCount, indian: indianCount }, lastSyncAt: syncAt });
-    } catch (e) {
-      console.error('sync-from-cm error', e);
-      return res.status(200).json({ ok: false, error: String(e) });
-    }
-  });
-
   // --- Admin: Upload product images (replace images array) ---
   app.post('/admin/product-images-upload', upload.array('images', 10), async (req, res) => {
     try {
@@ -269,27 +92,6 @@ export function registerAdminRoutes(app, adminDb) {
       return res.status(200).json({ ok: true, image_count: images.length });
     } catch (e) {
       console.error('product-images-upload error', e);
-      return res.status(200).json({ ok: false, error: String(e) });
-    }
-  });
-
-  // --- Admin: Get last Commerce Manager sync status ---
-  // Usage: GET /admin/sync-status
-  // No shared-secret required; this only returns metadata (timestamp + counts).
-  app.get('/admin/sync-status', async (req, res) => {
-    try {
-      const doc = await adminDb.collection('config').doc('sync_from_cm').get();
-      if (!doc.exists) {
-        return res.status(200).json({ ok: true, lastSyncAt: null, counts: { imported: 0, indian: 0 } });
-      }
-      const data = doc.data() || {};
-      const lastSyncAt = data.last_sync_at || null;
-      const lastCounts = data.last_counts || {};
-      const imported = typeof lastCounts.imported === 'number' ? lastCounts.imported : 0;
-      const indian = typeof lastCounts.indian === 'number' ? lastCounts.indian : 0;
-      return res.status(200).json({ ok: true, lastSyncAt, counts: { imported, indian } });
-    } catch (e) {
-      console.error('sync-status error', e);
       return res.status(200).json({ ok: false, error: String(e) });
     }
   });
