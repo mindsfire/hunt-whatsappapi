@@ -256,6 +256,7 @@ export function registerApiRoutes(app, adminDb) {
         if (!sku) continue;
         const pd = await getProductDoc(adminDb, sku).catch(() => null);
         if (!pd) continue;
+        if (pd.active === false) continue;
         const rawImages = Array.isArray(pd.images) ? pd.images : [];
         const images = rawImages.map(normalizeImageUrl);
         const heroIdx = Number.isInteger(pd.hero_image_index) ? pd.hero_image_index : 0;
