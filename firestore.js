@@ -17,7 +17,14 @@ export async function getSession(userId) {
   return doc.exists ? doc.data() : { state: 'start', mode: null, locale: 'en', cart: [] };
 }
 export async function saveSession(userId, data) {
-  await col('sessions').doc(userId).set({ ...data, updated_at: new Date().toISOString() }, { merge: true });
+  const nowIso = new Date().toISOString();
+  const payload = {
+    ...data,
+    // Preserve existing created_at if caller provided it; otherwise set it on first save.
+    created_at: data && data.created_at ? data.created_at : nowIso,
+    updated_at: nowIso,
+  };
+  await col('sessions').doc(userId).set(payload, { merge: true });
 }
 
 // --- Carts ---
