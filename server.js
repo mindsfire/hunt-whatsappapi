@@ -985,6 +985,34 @@ async function handleMessage(waUserId, text, rawMsg) {
     return sendLanguageSelector(to);
   }
 
+  // Special case: if user is already in web checkout and sends the pre-filled
+  // wholesale greeting again (from the message link), treat it as a request
+  // to resend the checkout link instead of restarting the whole flow.
+  if (sess.state === 'web_checkout') {
+    const hasWholesaleGreeting =
+      lower.includes('wholesale buyer') ||
+      lower.includes('latest clothing catalog') ||
+      lower.includes('order options');
+    if (hasWholesaleGreeting) {
+      try {
+        const l = sess.language || lang || 'en';
+        const url = await buildCheckoutUrl(waUserId);
+        const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
+        const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
+        const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
+        const msg = `${header}\n${body}\n${footer}`;
+        await sendText(to, msg);
+        // Stay in web_checkout state.
+        return;
+      } catch (_) {
+        try { await sendCheckoutLink(waUserId); } catch (_) {}
+        sess.state = 'web_checkout';
+        await dbSaveSession(waUserId, sess);
+        return;
+      }
+    }
+  }
+
   if (lower === 'start' || lower === 'hi' || lower === 'hello') {
     // Reset conversational state. If language is not chosen yet, show language gate.
     delete sess.mode;
