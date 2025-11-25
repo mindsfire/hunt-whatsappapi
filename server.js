@@ -992,7 +992,10 @@ async function handleMessage(waUserId, text, rawMsg) {
     const hasWholesaleGreeting =
       lower.includes('wholesale buyer') ||
       lower.includes('latest clothing catalog') ||
-      lower.includes('order options');
+      lower.includes('order options') ||
+      lower.includes('more info') ||
+      lower.includes('more information') ||
+      lower.includes('info on this');
     if (hasWholesaleGreeting) {
       try {
         const l = sess.language || lang || 'en';
