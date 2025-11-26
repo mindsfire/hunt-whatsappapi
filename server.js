@@ -554,7 +554,7 @@ async function sendCheckoutLink(toWaId) {
     // Prefer the approved WhatsApp template with deep link button.
     // If the template send fails for any reason, fall back to the plain text link.
     try {
-      await sendOrderReviewTemplate(toWaId, url);
+      await sendOrderReviewTemplate(toWaId, url, lang);
     } catch (_) {
       // Fallback: send the original text + URL so user still gets a working link.
       await sendText(toWaId, `${intro}\n${url}`);
