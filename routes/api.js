@@ -1,4 +1,4 @@
-import { getSession as dbGetSession, saveSession as dbSaveSession, getCart as dbGetCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
+import { getSession as dbGetSession, saveSession as dbSaveSession, getCart as dbGetCart, saveCart as dbSaveCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
 import { getCheckoutTokenStatus } from '../lib/checkout.js';
 import { google } from 'googleapis';
 import { sendButtons, sendText } from '../lib/wa.js';
@@ -119,6 +119,34 @@ export function registerApiRoutes(app, adminDb) {
       return res.status(200).json({ ok: true, items, business });
     } catch (e) {
       console.error('GET /api/cart error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
+
+  // POST /api/cart - persist web cart to Firestore for abandoned cart tracking
+  app.post('/api/cart', async (req, res) => {
+    try {
+      const u = (req.body?.u || '').toString().trim();
+      const tkn = (req.body?.t || '').toString().trim();
+      if (!u) return res.status(400).json({ ok: false, error: 'u required' });
+      if (!DISABLE_CHECKOUT_TOKEN) {
+        const status = await getCheckoutTokenStatus(u, tkn);
+        if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
+      }
+
+      const itemsIn = Array.isArray(req.body?.items) ? req.body.items : [];
+      // We allow empty items to clear the cart; just normalize shape
+      const norm = itemsIn.map((it) => ({
+        sku: (it.sku || it.content_id || '').toString().toLowerCase(),
+        content_id: (it.content_id || it.sku || '').toString().toLowerCase(),
+        qty: Number(it.qty || 1) || 1,
+        size: (it.size || '').toString()
+      })).filter((it) => it.content_id);
+
+      await dbSaveCart(u, { items: norm, currency: 'INR' });
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      console.error('POST /api/cart error', e);
       return res.status(200).json({ ok: false, error: String(e) });
     }
   });
