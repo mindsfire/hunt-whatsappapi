@@ -185,6 +185,21 @@ export function registerApiRoutes(app, adminDb) {
       try { await createOrderDoc(order); } catch (e) { console.error('createOrderDoc error', e); }
       try { await appendOrderToSheet(order); } catch (e) { console.error('appendOrderToSheet error', e); }
 
+      // Best-effort internal WhatsApp alert for new orders (owner/ops notifications)
+      try {
+        const internalWa = (process.env.INTERNAL_ALERT_WA || '').toString().trim();
+        if (internalWa) {
+          const totalStr = `₹${subtotal}`;
+          const buyerName = (business && business.name) ? business.name.toString() : '';
+          const buyerLine = buyerName ? `Buyer: *${buyerName}*\n` : '';
+          const buyerWaLine = `Whatsapp Number : *${u}*\n`;
+          const msg = `*New wholesale order placed 🚀*\n\nOrder ID : *${id}*\n${buyerLine}${buyerWaLine}\nTotal : *${totalStr}*`;
+          await sendText(internalWa, msg);
+        }
+      } catch (e) {
+        console.error('internal WA order alert error', e);
+      }
+
       // Best-effort WhatsApp confirmation back to the user
       try {
         let lang = 'en';
