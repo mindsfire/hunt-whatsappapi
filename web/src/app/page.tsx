@@ -79,6 +79,26 @@ export default function Page() {
     return () => clearTimeout(id);
   }, [toast]);
 
+  // Persist cart to backend for abandoned-cart tracking and refresh persistence
+  useEffect(() => {
+    if (!waId || !token) return;
+    // Don't send before initial cart load has completed
+    if (loading) return;
+    const handler = setTimeout(() => {
+      const payload = {
+        u: waId,
+        t: token,
+        items: items.map((it) => ({ content_id: it.content_id, qty: it.qty, size: it.size })),
+      };
+      fetch("/api/cart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(handler);
+  }, [waId, token, items, loading]);
+
   useEffect(() => {
     if (!waId || !token) return;
     setLoading(true);

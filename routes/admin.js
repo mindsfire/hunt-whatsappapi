@@ -488,6 +488,181 @@ export function registerAdminRoutes(app, adminDb) {
       return res.status(200).json({ ok: false, error: String(e) });
     }
   });
+
+  app.get('/admin/export-leads', async (req, res) => {
+    try {
+      if (SYNC_SHARED_SECRET) {
+        const token = req.get('X-Shared-Secret') || '';
+        if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+      }
+
+      const LEADS_SHEET_ID = process.env.LEADS_SHEET_ID || '';
+      if (!LEADS_SHEET_ID) {
+        console.warn('export-leads: LEADS_SHEET_ID not set, skipping');
+        return res.status(200).json({ ok: false, error: 'LEADS_SHEET_ID not configured' });
+      }
+
+      const now = nowIso();
+      const cutoff = new Date(Date.now() - 3 * 60 * 60 * 1000); // 3 hours ago
+      const cutoffIso = cutoff.toISOString();
+
+      const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+      const sheets = google.sheets({ version: 'v4', auth });
+
+      let retailCount = 0;
+      let webNoOrderCount = 0;
+      let cartNoOrderCount = 0;
+
+      // --- Retail_Opted ---
+      try {
+        const snap = await adminDb.collection('sessions')
+          .where('mode', '==', 'retail')
+          .where('state', '==', 'start')
+          .get();
+
+        const retailRows = [];
+        const retailToMark = [];
+
+        for (const doc of snap.docs) {
+          const data = doc.data() || {};
+          if (data.retail_exported === true) continue;
+          const updatedAt = (data.updated_at || '').toString();
+          if (updatedAt && updatedAt < cutoffIso) continue; // older than 3h
+          const createdAt = data.created_at || '';
+          const waUserId = doc.id;
+          const mode = data.mode || '';
+          const state = data.state || '';
+          const language = data.language || '';
+          const locale = data.locale || '';
+          retailRows.push([createdAt, waUserId, mode, state, language, locale, updatedAt]);
+          retailToMark.push(doc.ref);
+        }
+
+        if (retailRows.length) {
+          await sheets.spreadsheets.values.append({
+            spreadsheetId: LEADS_SHEET_ID,
+            range: 'Retail_Opted!A1',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: retailRows },
+          });
+
+          const batch = adminDb.batch();
+          for (const ref of retailToMark) {
+            batch.set(ref, { retail_exported: true, retail_exported_at: now }, { merge: true });
+          }
+          await batch.commit();
+          retailCount = retailRows.length;
+        }
+      } catch (e) {
+        console.error('export-leads: Retail_Opted export error', e);
+      }
+
+      // --- Web_No_Order ---
+      try {
+        const snap = await adminDb.collection('sessions')
+          .where('state', '==', 'web_checkout')
+          .get();
+
+        const webRows = [];
+        const webToMark = [];
+
+        for (const doc of snap.docs) {
+          const data = doc.data() || {};
+          if (data.web_no_order_exported === true) continue;
+          const updatedAt = (data.updated_at || '').toString();
+          if (!updatedAt || updatedAt < cutoffIso) continue; // older than 3h or missing
+
+          const waUserId = doc.id;
+          // Skip if any order exists for this wa_user_id
+          const ordSnap = await adminDb.collection('orders')
+            .where('wa_user_id', '==', waUserId)
+            .limit(1)
+            .get();
+          if (!ordSnap.empty) continue;
+
+          const createdAt = (data.created_at || '').toString();
+          const mode = data.mode || '';
+          const state = data.state || '';
+          const language = data.language || '';
+          const locale = data.locale || '';
+          const notes = [language, locale].filter(Boolean).join('/');
+          // Columns: Created at, WA User ID, Last State, Last Updated At, Has Order within 1hr?, Notes
+          webRows.push([createdAt, waUserId, state, updatedAt, 'No', notes]);
+          webToMark.push(doc.ref);
+        }
+
+        if (webRows.length) {
+          await sheets.spreadsheets.values.append({
+            spreadsheetId: LEADS_SHEET_ID,
+            range: 'Web_No_Order!A1',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: webRows },
+          });
+
+          const batch = adminDb.batch();
+          for (const ref of webToMark) {
+            batch.set(ref, { web_no_order_exported: true, web_no_order_exported_at: now }, { merge: true });
+          }
+          await batch.commit();
+          webNoOrderCount = webRows.length;
+        }
+      } catch (e) {
+        console.error('export-leads: Web_No_Order export error', e);
+      }
+
+      // --- Cart_No_Order ---
+      try {
+        const snap = await adminDb.collection('carts')
+          .where('updated_at', '>=', cutoffIso)
+          .get();
+
+        const cartRows = [];
+        const cartToMark = [];
+
+        for (const doc of snap.docs) {
+          const data = doc.data() || {};
+          if (data.cart_exported === true) continue;
+          const items = Array.isArray(data.items) ? data.items : [];
+          if (!items.length) continue;
+
+          const waUserId = doc.id;
+          // Skip if any order exists for this wa_user_id
+          const ordSnap = await adminDb.collection('orders')
+            .where('wa_user_id', '==', waUserId)
+            .limit(1)
+            .get();
+          if (!ordSnap.empty) continue;
+
+          const updatedAt = (data.updated_at || '').toString();
+          cartRows.push([updatedAt, waUserId, items.length]);
+          cartToMark.push(doc.ref);
+        }
+
+        if (cartRows.length) {
+          await sheets.spreadsheets.values.append({
+            spreadsheetId: LEADS_SHEET_ID,
+            range: 'Cart_No_Order!A1',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: cartRows },
+          });
+
+          const batch = adminDb.batch();
+          for (const ref of cartToMark) {
+            batch.set(ref, { cart_exported: true, cart_exported_at: now }, { merge: true });
+          }
+          await batch.commit();
+          cartNoOrderCount = cartRows.length;
+        }
+      } catch (e) {
+        console.error('export-leads: Cart_No_Order export error', e);
+      }
+
+      return res.status(200).json({ ok: true, retailCount, webNoOrderCount, cartNoOrderCount });
+    } catch (e) {
+      console.error('export-leads error', e);
+      return res.status(200).json({ ok: false, error: String(e) });
+    }
+  });
 }
 
 function validateRows(rows) {
