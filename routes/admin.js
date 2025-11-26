@@ -17,6 +17,13 @@ const upload = multer({
 });
 function nowIso() { return new Date().toISOString(); }
 
+function toIstString(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+}
+
 export function registerAdminRoutes(app, adminDb) {
   // --- Admin: Upload product images (replace images array) ---
   app.post('/admin/product-images-upload', upload.array('images', 10), async (req, res) => {
@@ -526,14 +533,15 @@ export function registerAdminRoutes(app, adminDb) {
         for (const doc of snap.docs) {
           const data = doc.data() || {};
           if (data.retail_exported === true) continue;
-          const updatedAt = (data.updated_at || '').toString();
-          if (updatedAt && updatedAt < cutoffIso) continue; // older than 3h
-          const createdAt = data.created_at || '';
+          const updatedAtRaw = (data.updated_at || '').toString();
+          if (updatedAtRaw && updatedAtRaw < cutoffIso) continue; // older than 3h
+          const createdAt = toIstString(data.created_at || '');
           const waUserId = doc.id;
           const mode = data.mode || '';
           const state = data.state || '';
           const language = data.language || '';
           const locale = data.locale || '';
+          const updatedAt = toIstString(updatedAtRaw);
           retailRows.push([createdAt, waUserId, mode, state, language, locale, updatedAt]);
           retailToMark.push(doc.ref);
         }
@@ -569,8 +577,8 @@ export function registerAdminRoutes(app, adminDb) {
         for (const doc of snap.docs) {
           const data = doc.data() || {};
           if (data.web_no_order_exported === true) continue;
-          const updatedAt = (data.updated_at || '').toString();
-          if (!updatedAt || updatedAt < cutoffIso) continue; // older than 3h or missing
+          const updatedAtRaw = (data.updated_at || '').toString();
+          if (!updatedAtRaw || updatedAtRaw < cutoffIso) continue; // older than 3h or missing
 
           const waUserId = doc.id;
           // Skip if any order exists for this wa_user_id
@@ -580,13 +588,14 @@ export function registerAdminRoutes(app, adminDb) {
             .get();
           if (!ordSnap.empty) continue;
 
-          const createdAt = (data.created_at || '').toString();
+          const createdAt = toIstString((data.created_at || '').toString());
           const mode = data.mode || '';
           const state = data.state || '';
           const language = data.language || '';
           const locale = data.locale || '';
           const notes = [language, locale].filter(Boolean).join('/');
           // Columns: Created at, WA User ID, Last State, Last Updated At, Has Order within 1hr?, Notes
+          const updatedAt = toIstString(updatedAtRaw);
           webRows.push([createdAt, waUserId, state, updatedAt, 'No', notes]);
           webToMark.push(doc.ref);
         }
@@ -633,7 +642,7 @@ export function registerAdminRoutes(app, adminDb) {
             .get();
           if (!ordSnap.empty) continue;
 
-          const updatedAt = (data.updated_at || '').toString();
+          const updatedAt = toIstString((data.updated_at || '').toString());
           cartRows.push([updatedAt, waUserId, items.length]);
           cartToMark.push(doc.ref);
         }

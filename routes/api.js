@@ -6,6 +6,13 @@ import { t } from '../locales.js';
 
 function nowIso() { return new Date().toISOString(); }
 
+function toIstString(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+}
+
 function normalizeImageUrl(u) {
   if (!u || typeof u !== 'string') return u;
   if (u.startsWith('gs://')) {
@@ -58,7 +65,8 @@ async function appendOrderToSheet(order) {
     const business = order.business || {};
     const gstin = (business.gstin || '').toString();
     const address = (business.address || '').toString();
-    const row = [order.created_at, order.id, order.wa_user_id, business.name || '', gstin, address, itemsSummary, order.subtotal, order.currency, 'placed'];
+    const createdAtIst = toIstString(order.created_at || '');
+    const row = [createdAtIst, order.id, order.wa_user_id, business.name || '', gstin, address, itemsSummary, order.subtotal, order.currency, 'placed'];
     await sheets.spreadsheets.values.append({
       spreadsheetId: SALES_SHEET_ID,
       range: 'Orders!A1',
