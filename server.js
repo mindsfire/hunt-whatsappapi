@@ -961,10 +961,19 @@ async function handleMessage(waUserId, text, rawMsg) {
       const l = sess.language || lang || 'en';
       const url = await buildCheckoutUrl(waUserId);
       const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
-      const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
+      const body = t(l, 'WEB_CHECKOUT_RESTART_BODY');
       const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
-      const msg = `${header}\n${body}\n${footer}`;
+      const msg = `${header}\n\n${body}\n\n${url}\n\n${footer}`;
       await sendText(to, msg);
+      const resendTitle = t(l, 'BUTTON_RESEND_LINK');
+      const changeLangTitle = t(l, 'BUTTON_CHANGE_LANGUAGE');
+      const helpTitle = t(l, 'BUTTON_HELP');
+      const nextStepsBody = t(l, 'NEXT_STEPS_TITLE') || header;
+      await sendButtons(to, nextStepsBody, [
+        { type: 'reply', reply: { id: 'web_restart', title: resendTitle } },
+        { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+        { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+      ]);
       // Keep web_checkout state
       sess.state = 'web_checkout';
       await dbSaveSession(waUserId, sess);
@@ -1003,8 +1012,17 @@ async function handleMessage(waUserId, text, rawMsg) {
         const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
         const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
         const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
-        const msg = `${header}\n${body}\n${footer}`;
+        const msg = `${header}\n\n${body}\n\n${url}\n\n${footer}`;
         await sendText(to, msg);
+        const resendTitle = t(l, 'BUTTON_RESEND_LINK');
+        const changeLangTitle = t(l, 'BUTTON_CHANGE_LANGUAGE');
+        const helpTitle = t(l, 'BUTTON_HELP');
+        const nextStepsBody = t(l, 'NEXT_STEPS_TITLE') || header;
+        await sendButtons(to, nextStepsBody, [
+          { type: 'reply', reply: { id: 'web_restart', title: resendTitle } },
+          { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+          { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+        ]);
         // Stay in web_checkout state.
         return;
       } catch (_) {
@@ -1036,10 +1054,19 @@ async function handleMessage(waUserId, text, rawMsg) {
         const l = sess.language || lang || 'en';
         const url = await buildCheckoutUrl(waUserId);
         const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
-        const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
+        const body = t(l, 'WEB_CHECKOUT_RESTART_BODY');
         const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
-        const msg = `${header}\n${body}\n${footer}`;
+        const msg = `${header}\n\n${body}\n\n${url}\n\n${footer}`;
         await sendText(to, msg);
+        const resendTitle = t(l, 'BUTTON_RESEND_LINK');
+        const changeLangTitle = t(l, 'BUTTON_CHANGE_LANGUAGE');
+        const helpTitle = t(l, 'BUTTON_HELP');
+        const nextStepsBody = t(l, 'NEXT_STEPS_TITLE') || header;
+        await sendButtons(to, nextStepsBody, [
+          { type: 'reply', reply: { id: 'web_restart', title: resendTitle } },
+          { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+          { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+        ]);
         // Stay in web_checkout state so future messages are treated as part of checkout.
         return;
       } catch (_) {
