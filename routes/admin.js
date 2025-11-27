@@ -259,6 +259,28 @@ export function registerAdminRoutes(app, adminDb) {
     }
   });
 
+  // --- Admin helpers ---
+  async function getProductTitleCached(adminDb, sku, cache) {
+    const key = (sku || '').toString().trim().toLowerCase();
+    if (!key) return '';
+    if (cache[key] !== undefined) return cache[key];
+    try {
+      const doc = await adminDb.collection('products').doc(key).get();
+      if (!doc.exists) {
+        cache[key] = key.toUpperCase();
+        return cache[key];
+      }
+      const data = doc.data() || {};
+      const title = (data.title || key.toUpperCase()).toString();
+      cache[key] = title;
+      return title;
+    } catch (e) {
+      console.error('getProductTitleCached error', { sku: key, error: e });
+      cache[key] = key.toUpperCase();
+      return cache[key];
+    }
+  }
+
   // --- Admin: Export products as CSV for pricing seeding ---
   app.get('/admin/export-products-csv', async (req, res) => {
     try {
@@ -627,6 +649,7 @@ export function registerAdminRoutes(app, adminDb) {
 
         const cartRows = [];
         const cartToMark = [];
+        const titleCache = {};
 
         for (const doc of snap.docs) {
           const data = doc.data() || {};
@@ -651,7 +674,8 @@ export function registerAdminRoutes(app, adminDb) {
             const qtyNum = Number(it.qty || 0) || 0;
             const size = (it.size || '').toString().trim();
             if (!sku && !qtyNum && !size) continue;
-            let seg = sku || '';
+            const title = await getProductTitleCached(adminDb, sku, titleCache);
+            let seg = title || sku || '';
             if (size) seg = seg ? `${seg} (${size})` : size;
             if (qtyNum) seg = seg ? `${seg} * ${qtyNum}` : String(qtyNum);
             if (seg) summaryParts.push(seg);

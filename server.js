@@ -559,6 +559,18 @@ async function sendCheckoutLink(toWaId) {
       // Fallback: send the original text + URL so user still gets a working link.
       await sendText(toWaId, `${intro}\n${url}`);
     }
+
+    // After sharing the checkout link, provide navigation buttons so the user
+    // can easily restart, change language, or get help from the same thread.
+    const resendTitle = t(lang, 'BUTTON_RESEND_LINK');
+    const changeLangTitle = t(lang, 'BUTTON_CHANGE_LANGUAGE');
+    const helpTitle = t(lang, 'BUTTON_HELP');
+    const nextStepsBody = t(lang, 'NEXT_STEPS_TITLE') || intro;
+    await sendButtons(toWaId, nextStepsBody, [
+      { type: 'reply', reply: { id: 'web_restart', title: resendTitle } },
+      { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+      { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+    ]);
   } catch (_) { /* non-fatal */ }
 }
 
@@ -1147,7 +1159,17 @@ async function handleMessage(waUserId, text, rawMsg) {
           const confirm = t('en', 'LANG_CHANGED_CONFIRM');
           const intro = t('en', 'LANG_CHANGED_REORDER_INTRO');
           const msg = `${confirm}\n${intro}\n\n${url}`;
-          return sendText(to, msg);
+          await sendText(to, msg);
+          const resendTitle = t('en', 'BUTTON_RESEND_LINK');
+          const changeLangTitle = t('en', 'BUTTON_CHANGE_LANGUAGE');
+          const helpTitle = t('en', 'BUTTON_HELP');
+          const nextStepsBody = t('en', 'NEXT_STEPS_TITLE') || intro;
+          await sendButtons(to, nextStepsBody, [
+            { type: 'reply', reply: { id: 'web_restart', title: resendTitle } },
+            { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+            { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+          ]);
+          return;
         } catch (_) {
           try { await sendCheckoutLink(waUserId); } catch (_) {}
           return;
@@ -1188,7 +1210,17 @@ async function handleMessage(waUserId, text, rawMsg) {
           const confirm = t(l, 'LANG_CHANGED_CONFIRM');
           const intro = t(l, 'LANG_CHANGED_REORDER_INTRO');
           const msg = `${confirm}\n${intro}\n\n${url}`;
-          return sendText(to, msg);
+            await sendText(to, msg);
+            const resendTitle = t(l, 'BUTTON_RESEND_LINK');
+            const changeLangTitle = t(l, 'BUTTON_CHANGE_LANGUAGE');
+            const helpTitle = t(l, 'BUTTON_HELP');
+            const nextStepsBody = t(l, 'NEXT_STEPS_TITLE') || intro;
+            await sendButtons(to, nextStepsBody, [
+              { type: 'reply', reply: { id: 'web_restart', title: resendTitle } },
+              { type: 'reply', reply: { id: 'web_change_lang', title: changeLangTitle } },
+              { type: 'reply', reply: { id: 'web_help', title: helpTitle } }
+            ]);
+            return;
         } catch (_) {
           try { await sendCheckoutLink(waUserId); } catch (_) {}
           return;
