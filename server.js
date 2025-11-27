@@ -1010,7 +1010,7 @@ async function handleMessage(waUserId, text, rawMsg) {
         const l = sess.language || lang || 'en';
         const url = await buildCheckoutUrl(waUserId);
         const header = t(l, 'WEB_CHECKOUT_RESTART_HEADER');
-        const body = t(l, 'WEB_CHECKOUT_RESTART_BODY', { checkout_url: url });
+        const body = t(l, 'WEB_CHECKOUT_RESTART_BODY');
         const footer = t(l, 'WEB_CHECKOUT_RESTART_FOOTER');
         const msg = `${header}\n\n${body}\n\n${url}\n\n${footer}`;
         await sendText(to, msg);
