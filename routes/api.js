@@ -283,7 +283,7 @@ export function registerApiRoutes(app, adminDb) {
     try {
       const u = (req.query.u || '').toString().trim();
       const tkn = (req.query.t || '').toString().trim();
-      const type = (req.query.type || 'indian').toString().toLowerCase();
+      const rawType = (req.query.type || 'indian').toString().toLowerCase();
       const page = Math.max(1, parseInt((req.query.page || '1').toString(), 10) || 1);
       const pageSize = Math.max(1, Math.min(50, parseInt((req.query.pageSize || '20').toString(), 10) || 20));
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
@@ -292,8 +292,24 @@ export function registerApiRoutes(app, adminDb) {
         if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
       }
 
-      const doc = await adminDb.collection('products_by_type').doc(type).get();
-      const list = doc.exists ? (doc.data().items || []) : [];
+      let type = rawType;
+      let list = [];
+
+      if (rawType === 'all') {
+        // Combine Indian and Imported product lists into a single "all" view
+        const [indDoc, impDoc] = await Promise.all([
+          adminDb.collection('products_by_type').doc('indian').get(),
+          adminDb.collection('products_by_type').doc('imported').get(),
+        ]);
+        const indList = indDoc.exists ? (indDoc.data().items || []) : [];
+        const impList = impDoc.exists ? (impDoc.data().items || []) : [];
+        list = [...indList, ...impList];
+        type = 'all';
+      } else {
+        const doc = await adminDb.collection('products_by_type').doc(type).get();
+        list = doc.exists ? (doc.data().items || []) : [];
+      }
+
       const total = Array.isArray(list) ? list.length : 0;
       const pageCount = Math.max(1, Math.ceil(total / pageSize));
       const p = Math.min(Math.max(1, page), pageCount);

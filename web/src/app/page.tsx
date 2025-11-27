@@ -55,7 +55,7 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
 
   // Browse state
-  const [browseType, setBrowseType] = useState<"indian" | "imported">("indian");
+  const [browseType, setBrowseType] = useState<"all" | "indian" | "imported">("all");
   const [prods, setProds] = useState<Product[]>([]);
   const [prodLoading, setProdLoading] = useState(false);
   const [prodPage, setProdPage] = useState(1);
@@ -137,7 +137,9 @@ export default function Page() {
   useEffect(() => {
     if (!waId || !token) return;
     setProdLoading(true);
-    fetch(`/api/products?u=${encodeURIComponent(waId)}&t=${encodeURIComponent(token)}&type=${browseType}&page=${prodPage}`)
+    const base = `/api/products?u=${encodeURIComponent(waId)}&t=${encodeURIComponent(token)}&type=${browseType}&page=${prodPage}`;
+    const url = browseType === "all" ? `${base}&pageSize=15` : base;
+    fetch(url)
       .then(async (r) => {
         if (!r.ok) {
           let msg = `Products error ${r.status}`;
@@ -419,6 +421,12 @@ export default function Page() {
           {/* Browse */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", gap: 12, marginBottom: 12, justifyContent: "center" }}>
+              <button
+                onClick={() => { setBrowseType("all"); setProdPage(1); }}
+                style={{ padding: "12px 24px", borderRadius: 6, border: "1px solid #333", background: browseType === "all" ? "#222" : "#111", color: "#eaeaea", fontWeight: 600, fontSize: 17 }}
+              >
+                All
+              </button>
               <button
                 onClick={() => { setBrowseType("indian"); setProdPage(1); }}
                 style={{ padding: "12px 24px", borderRadius: 6, border: "1px solid #333", background: browseType === "indian" ? "#222" : "#111", color: "#eaeaea", fontWeight: 600, fontSize: 17 }}
