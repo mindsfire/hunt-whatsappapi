@@ -17,6 +17,13 @@ const upload = multer({
 });
 function nowIso() { return new Date().toISOString(); }
 
+function toIstString(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+}
+
 export function registerAdminRoutes(app, adminDb) {
   // --- Admin: Upload product images (replace images array) ---
   app.post('/admin/product-images-upload', upload.array('images', 10), async (req, res) => {
@@ -251,6 +258,28 @@ export function registerAdminRoutes(app, adminDb) {
       return res.status(200).json({ ok: false, error: String(e) });
     }
   });
+
+  // --- Admin helpers ---
+  async function getProductTitleCached(adminDb, sku, cache) {
+    const key = (sku || '').toString().trim().toLowerCase();
+    if (!key) return '';
+    if (cache[key] !== undefined) return cache[key];
+    try {
+      const doc = await adminDb.collection('products').doc(key).get();
+      if (!doc.exists) {
+        cache[key] = key.toUpperCase();
+        return cache[key];
+      }
+      const data = doc.data() || {};
+      const title = (data.title || key.toUpperCase()).toString();
+      cache[key] = title;
+      return title;
+    } catch (e) {
+      console.error('getProductTitleCached error', { sku: key, error: e });
+      cache[key] = key.toUpperCase();
+      return cache[key];
+    }
+  }
 
   // --- Admin: Export products as CSV for pricing seeding ---
   app.get('/admin/export-products-csv', async (req, res) => {
@@ -526,14 +555,15 @@ export function registerAdminRoutes(app, adminDb) {
         for (const doc of snap.docs) {
           const data = doc.data() || {};
           if (data.retail_exported === true) continue;
-          const updatedAt = (data.updated_at || '').toString();
-          if (updatedAt && updatedAt < cutoffIso) continue; // older than 3h
-          const createdAt = data.created_at || '';
+          const updatedAtRaw = (data.updated_at || '').toString();
+          if (updatedAtRaw && updatedAtRaw < cutoffIso) continue; // older than 3h
+          const createdAt = toIstString(data.created_at || '');
           const waUserId = doc.id;
           const mode = data.mode || '';
           const state = data.state || '';
           const language = data.language || '';
           const locale = data.locale || '';
+          const updatedAt = toIstString(updatedAtRaw);
           retailRows.push([createdAt, waUserId, mode, state, language, locale, updatedAt]);
           retailToMark.push(doc.ref);
         }
@@ -569,8 +599,8 @@ export function registerAdminRoutes(app, adminDb) {
         for (const doc of snap.docs) {
           const data = doc.data() || {};
           if (data.web_no_order_exported === true) continue;
-          const updatedAt = (data.updated_at || '').toString();
-          if (!updatedAt || updatedAt < cutoffIso) continue; // older than 3h or missing
+          const updatedAtRaw = (data.updated_at || '').toString();
+          if (!updatedAtRaw || updatedAtRaw < cutoffIso) continue; // older than 3h or missing
 
           const waUserId = doc.id;
           // Skip if any order exists for this wa_user_id
@@ -580,13 +610,14 @@ export function registerAdminRoutes(app, adminDb) {
             .get();
           if (!ordSnap.empty) continue;
 
-          const createdAt = (data.created_at || '').toString();
+          const createdAt = toIstString((data.created_at || '').toString());
           const mode = data.mode || '';
           const state = data.state || '';
           const language = data.language || '';
           const locale = data.locale || '';
           const notes = [language, locale].filter(Boolean).join('/');
           // Columns: Created at, WA User ID, Last State, Last Updated At, Has Order within 1hr?, Notes
+          const updatedAt = toIstString(updatedAtRaw);
           webRows.push([createdAt, waUserId, state, updatedAt, 'No', notes]);
           webToMark.push(doc.ref);
         }
@@ -618,6 +649,7 @@ export function registerAdminRoutes(app, adminDb) {
 
         const cartRows = [];
         const cartToMark = [];
+        const titleCache = {};
 
         for (const doc of snap.docs) {
           const data = doc.data() || {};
@@ -633,8 +665,27 @@ export function registerAdminRoutes(app, adminDb) {
             .get();
           if (!ordSnap.empty) continue;
 
-          const updatedAt = (data.updated_at || '').toString();
-          cartRows.push([updatedAt, waUserId, items.length]);
+          const updatedAt = toIstString((data.updated_at || '').toString());
+          const summaryParts = [];
+          for (const it of items) {
+            if (!it) continue;
+            const rawSku = (it.sku || it.content_id || '').toString();
+            const sku = rawSku.trim();
+            const qtyNum = Number(it.qty || 0) || 0;
+            const size = (it.size || '').toString().trim();
+            if (!sku && !qtyNum && !size) continue;
+            const title = await getProductTitleCached(adminDb, sku, titleCache);
+            let seg = title || sku || '';
+            if (size) seg = seg ? `${seg} (${size})` : size;
+            if (qtyNum) seg = seg ? `${seg} * ${qtyNum}` : String(qtyNum);
+            if (seg) summaryParts.push(seg);
+          }
+          const itemSummary = summaryParts.join(', ');
+          const cartItemCount = items.length;
+          const hasOrderedWithin3h = 'No';
+          const notes = '';
+          // Columns: Cart Updated At, WA User ID, Item Summary, Cart Item Count, Has ordered within 3hr?, Notes
+          cartRows.push([updatedAt, waUserId, itemSummary, cartItemCount, hasOrderedWithin3h, notes]);
           cartToMark.push(doc.ref);
         }
 
