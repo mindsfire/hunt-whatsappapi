@@ -491,6 +491,15 @@ export default function Page() {
                     {formatCurrency(it.currency)} {it.price}
                     {it.pcs_per_set && it.pcs_per_set > 0 ? ` x ${it.pcs_per_set} Pcs Set` : ""}
                   </div>
+                  <div style={{ fontSize: 13, marginTop: 2 }}>
+                    {(() => {
+                      const qtySets = it.qty || 0;
+                      const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+                      const pricePerPiece = it.price || 0;
+                      const lineTotal = qtySets * pcsPerSet * pricePerPiece;
+                      return <b>{formatCurrency(it.currency)} {lineTotal.toFixed(2)}</b>;
+                    })()}
+                  </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
                     <div style={{ display: "flex", gap: 8 }}>
                       <select
@@ -598,9 +607,53 @@ export default function Page() {
             )}
           </div>
 
-          <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", paddingLeft: 8, paddingRight: 8 }}>
-            <div style={{ fontWeight: 600 }}>Total: {formatCurrency(items[0]?.currency || 'INR')} {total.toFixed(2)}</div>
-            <button onClick={placeOrder} disabled={placing} style={{ padding: "13px 28px", background: "#16a34a", color: "white", border: 0, borderRadius: 6, cursor: "pointer", fontSize: 15 }}>
+          {items.length > 0 && (
+            <div style={{ marginTop: 16, paddingLeft: 8, paddingRight: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, marginBottom: 6 }}>
+                <span aria-hidden="true">🧾</span>
+                <span>Bill Summary</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+                {items.map((it, i) => {
+                  const qtySets = it.qty || 0;
+                  const pcsPerSet = it.pcs_per_set && it.pcs_per_set > 0 ? it.pcs_per_set : 1;
+                  const pricePerPiece = it.price || 0; // Catalog price is per piece
+                  const lineTotal = qtySets * pcsPerSet * pricePerPiece;
+                  const left = `${it.title} | ${it.size || "-"} | ${qtySets} x ${pcsPerSet} Pcs Set`;
+                  return (
+                    <div key={it.content_id + ':' + i} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{left}</span>
+                      <span style={{ whiteSpace: "nowrap" }}>{formatCurrency(it.currency)} {lineTotal.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, fontSize: 14, marginTop: 10 }}>
+                <span>Items total</span>
+                <span>{formatCurrency(items[0]?.currency || 'INR')} {total.toFixed(2)}</span>
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 6 }}>
+                Payment is collected after you place the order. Our sales team will contact you to confirm payment and delivery details.
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginTop: 16, display: "flex", justifyContent: "center", paddingLeft: 8, paddingRight: 8 }}>
+            <button
+              onClick={placeOrder}
+              disabled={placing}
+              style={{
+                padding: "13px 32px",
+                background: "#16a34a",
+                color: "white",
+                border: 0,
+                borderRadius: 9999,
+                cursor: placing ? "default" : "pointer",
+                fontSize: 15,
+                minWidth: 180,
+                fontWeight: 600,
+              }}
+            >
               {placing ? "Placing…" : "Place Order"}
             </button>
           </div>
