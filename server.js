@@ -352,6 +352,8 @@ function toIstString(iso) {
 async function handleReengageUsers(req, res) {
   const startTime = Date.now();
   const runId = `reengage-${Date.now()}`;
+  let webResult = { processed: 0, skipped: 0, failed: 0 };
+  let cartResult = { processed: 0, skipped: 0, failed: 0 };
   
   try {
     if (SYNC_SHARED_SECRET) {
@@ -367,12 +369,12 @@ async function handleReengageUsers(req, res) {
     const processedUsers = new Set();
     
     console.log(`[${runId}] Processing web_no_order users...`);
-    const webResult = await reengageWebNoOrderUsers(sendCheckoutLink, { limit: 4, processedUsers });
+    webResult = await reengageWebNoOrderUsers({ limit: 4, processedUsers });
     console.log(`[${runId}] Web_No_Order completed: ${webResult.processed} users processed`);
     
     // Pass the same Set to cart function so it skips users already processed by web function
     console.log(`[${runId}] Processing cart_no_order users...`);
-    const cartResult = await reengageCartNoOrderUsers(sendCheckoutLink, { processedUsers });
+    cartResult = await reengageCartNoOrderUsers({ processedUsers });
     console.log(`[${runId}] Cart_No_Order completed: ${cartResult.processed} users processed`);
 
     const totalProcessed = webResult.processed + cartResult.processed;
@@ -388,8 +390,8 @@ async function handleReengageUsers(req, res) {
     const response = {
       ok: true,
       run_id: runId,
-      web_no_order: { processed: webResult.processed },
-      cart_no_order: { processed: cartResult.processed },
+      web_no_order: { processed: webResult.processed, skipped: webResult.skipped, failed: webResult.failed },
+      cart_no_order: { processed: cartResult.processed, skipped: cartResult.skipped, failed: cartResult.failed },
       total_processed: totalProcessed,
       duration_ms: duration
     };
@@ -426,9 +428,23 @@ async function handleReengageUsers(req, res) {
   } catch (e) {
     const duration = Date.now() - startTime;
     const errorMsg = String(e);
-    console.error(`[${runId}] Re-engagement job failed after ${duration}ms`, { error: e, stack: e.stack });
+    console.error(`[${runId}] Re-engagement job failed after ${duration}ms`, {
+      error: e,
+      stack: e.stack,
+      web_no_order: webResult,
+      cart_no_order: cartResult
+    });
     
-    const response = { ok: false, run_id: runId, error: errorMsg, duration_ms: duration };
+    const totalProcessed = (webResult.processed || 0) + (cartResult.processed || 0);
+    const response = {
+      ok: false,
+      run_id: runId,
+      error: errorMsg,
+      duration_ms: duration,
+      web_no_order: webResult,
+      cart_no_order: cartResult,
+      total_processed: totalProcessed
+    };
 
     // Log to Google Sheets even on error (best-effort, don't fail if this fails)
     try {
@@ -439,9 +455,9 @@ async function handleReengageUsers(req, res) {
         const row = [
           timestamp,
           runId,
-          0, // web_no_order processed (failed before completion)
-          0, // cart_no_order processed (failed before completion)
-          0, // total processed
+          webResult.processed || 0,
+          cartResult.processed || 0,
+          totalProcessed,
           duration,
           'Error',
           errorMsg.substring(0, 500) // Limit error message length
