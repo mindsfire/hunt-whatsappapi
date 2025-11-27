@@ -12,6 +12,7 @@ import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId,
 import { makeCheckoutToken, verifyCheckoutToken, buildCheckoutUrl } from './lib/checkout.js';
 import { graphGet, fetchSets, fetchSetItems, fetchSetProductsDetailed, parsePriceToNumber } from './lib/graph.js';
 import { getOrCreateMediaIdForGcsPath } from './lib/media.js';
+import { reengageWebNoOrderUsers, reengageCartNoOrderUsers } from './lib/reengage.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerApiRoutes } from './routes/api.js';
 import {
@@ -333,8 +334,36 @@ app.get('/admin/export-products-csv', async (req, res) => {
   }
 });
 
-
 function nowIso() { return new Date().toISOString(); }
+
+// --- Admin: Re-engage Web_No_Order and Cart_No_Order users ---
+// Web_No_Order: Sends hero images (cheapest Indian products) + fresh checkout link
+// Cart_No_Order: Sends fresh checkout link only (no images)
+// Usage: POST /admin/reengage-users  (protected by SYNC_SHARED_SECRET)
+// Can be triggered by Cloud Scheduler
+app.post('/admin/reengage-users', async (req, res) => {
+  try {
+    if (SYNC_SHARED_SECRET) {
+      const token = req.get('X-Shared-Secret') || '';
+      if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+    }
+
+    const [webResult, cartResult] = await Promise.all([
+      reengageWebNoOrderUsers(sendCheckoutLink, { limit: 4 }),
+      reengageCartNoOrderUsers(sendCheckoutLink)
+    ]);
+
+    return res.status(200).json({
+      ok: true,
+      web_no_order: webResult,
+      cart_no_order: cartResult,
+      total_processed: webResult.processed + cartResult.processed
+    });
+  } catch (e) {
+    console.error('reengage-users error', e);
+    return res.status(200).json({ ok: false, error: String(e) });
+  }
+});
 
 // --- Firestore-backed browse/detail (GCS indexed) ---
 async function getTypes() {
