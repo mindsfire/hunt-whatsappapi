@@ -643,7 +643,25 @@ export function registerAdminRoutes(app, adminDb) {
           if (!ordSnap.empty) continue;
 
           const updatedAt = toIstString((data.updated_at || '').toString());
-          cartRows.push([updatedAt, waUserId, items.length]);
+          const summaryParts = [];
+          for (const it of items) {
+            if (!it) continue;
+            const rawSku = (it.sku || it.content_id || '').toString();
+            const sku = rawSku.trim();
+            const qtyNum = Number(it.qty || 0) || 0;
+            const size = (it.size || '').toString().trim();
+            if (!sku && !qtyNum && !size) continue;
+            let seg = sku || '';
+            if (size) seg = seg ? `${seg} (${size})` : size;
+            if (qtyNum) seg = seg ? `${seg} * ${qtyNum}` : String(qtyNum);
+            if (seg) summaryParts.push(seg);
+          }
+          const itemSummary = summaryParts.join(', ');
+          const cartItemCount = items.length;
+          const hasOrderedWithin3h = 'No';
+          const notes = '';
+          // Columns: Cart Updated At, WA User ID, Item Summary, Cart Item Count, Has ordered within 3hr?, Notes
+          cartRows.push([updatedAt, waUserId, itemSummary, cartItemCount, hasOrderedWithin3h, notes]);
           cartToMark.push(doc.ref);
         }
 
