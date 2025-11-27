@@ -88,7 +88,8 @@ export const messages = {
     BUTTON_START: "Start again",
     BUTTON_CHANGE_LANGUAGE: "Change language",
     LANG_CHANGED_CONFIRM: "Your preferred language is set.",
-    LANG_CHANGED_REORDER_INTRO: "Here is your fresh link to review items and reorder again."
+    LANG_CHANGED_REORDER_INTRO: "Here is your fresh link to review items and reorder again.",
+    WEB_NO_ORDER_REENGAGE_BODY: "Hey 👋\n\nWe noticed you were checking out our wholesale collection but didn’t get to finish your order yet.\n\nUse this fresh link to review your cart, update quantities, and confirm your wholesale order.\n\nIf you want to start again or change language, please use the options below."
   },
   kn: {
     LANG_GATE_PROMPT: "Choose your language / ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆಯ್ಕೆಮಾಡಿ",
@@ -173,6 +174,7 @@ export const messages = {
     BUTTON_CHANGE_LANGUAGE: "ಭಾಷೆ ಬದಲಾಯಿಸಿ",
     LANG_CHANGED_CONFIRM: "ನಿಮ್ಮ ಆಯ್ಕೆಯ ಭಾಷೆಯನ್ನು ಸೆಟ್ ಮಾಡಲಾಗಿದೆ.",
     LANG_CHANGED_REORDER_INTRO: "ಇಲ್ಲಿ ನಿಮ್ಮ items ಪರಿಶೀಲಿಸಿ ಮತ್ತೆ order ಮಾಡಲು ಹೊಸ link ಇಲ್ಲಿದೆ.",
+    WEB_NO_ORDER_REENGAGE_BODY: "Hey 👋\n\nನೀವು ನಮ್ಮ wholesale collection ನೋಡುತ್ತಿದ್ದೀರಾ, ಆದರೆ order ಅನ್ನು ಪೂರ್ಣಗೊಳಿಸುವ ಮುನ್ನ ನಿಂತಂತಿದೆ.\n\nಈ ಹೊಸ link ಬಳಸಿ ನಿಮ್ಮ cart ಪರಿಶೀಲಿಸಿ, quantities ಅಪ್ಡೇಟ್ ಮಾಡಿ, ನಿಮ್ಮ wholesale order ಅನ್ನು Confirm ಮಾಡಿ.\n\nಮತ್ತೆ ಪ್ರಾರಂಭಿಸಲು ಅಥವಾ ಭಾಷೆ ಬದಲಾಯಿಸಲು, ಕೆಳಗಿನ ಆಯ್ಕೆಗಳನ್ನು ಬಳಸಿ.",
     BUTTON_CONTACT_SUPPORT: "ಸಪೋರ್ಟ್ ಸಂಪರ್ಕ",
     CONTACT_SUPPORT_MESSAGE: "*ಸಪೋರ್ಟ್ ಸಂಪರ್ಕ*\n\nನಿಮ್ಮ wholesale order ಬಗ್ಗೆ ಸಹಾಯ ಬೇಕಿದ್ದರೆ, ನಮ್ಮ sales ತಂಡವನ್ನು ಸಂಪರ್ಕಿಸಬಹುದು:\n\n- Email: *connect.mansimpex@gmail.com*\n- Sales: *91871 17080*, *84960 07080*\n\n_ಅವಶ್ಯವಿದ್ದರೆ ಕೆಳಗಿನ ಆಯ್ಕೆಗಳಿಂದ ಮತ್ತೆ ಪ್ರಾರಂಭಿಸಬಹುದು ಅಥವಾ ಭಾಷೆ ಬದಲಾಯಿಸಬಹುದು._"
   },
@@ -259,6 +261,7 @@ export const messages = {
     BUTTON_CHANGE_LANGUAGE: "மொழி மாற்று",
     LANG_CHANGED_CONFIRM: "உங்கள் விருப்ப மொழி அமைக்கப்பட்டது.",
     LANG_CHANGED_REORDER_INTRO: "இங்கே உங்கள் items ஐ review செய்து மீண்டும் order செய்ய புதிய link உள்ளது.",
+    WEB_NO_ORDER_REENGAGE_BODY: "Hey 👋\n\nநீங்கள் எங்கள் wholesale collection ஐப் பார்த்துக் கொண்டிருந்தீர்கள், ஆனால் order ஐ முடிக்க முடியவில்லை போலத் தெரிகிறது.\n\nஇந்த புதிய link ஐ பயன்படுத்தி உங்கள் cart ஐ மீண்டும் பார்க்கவும், quantities ஐ update செய்யவும், உங்கள் wholesale order ஐ உறுதிப்படுத்தவும்.\n\nமீண்டும் தொடங்கவோ அல்லது மொழியை மாற்றவோ விரும்பினால், கீழே உள்ள options ஐ பயன்படுத்தவும்.",
     BUTTON_CONTACT_SUPPORT: "Support தொடர்பு",
     CONTACT_SUPPORT_MESSAGE: "*Support தொடர்பு*\n\nஉங்கள் wholesale order பற்றி உதவி தேவையானால், எங்கள் sales குழுவை தொடர்பு கொள்ளலாம்:\n\n- Email: *connect.mansimpex@gmail.com*\n- Sales: *91871 17080*, *84960 07080*\n\n_தேவையானால் கீழே உள்ள தேர்வுகளை பயன்படுத்தி மீண்டும் தொடங்கவோ அல்லது மொழியை மாற்றவோலாம்._"
   },
@@ -338,6 +341,7 @@ export const messages = {
     PRODUCTS_PAGE_TITLE: "Page {page}/{totalPages}",
     LANG_CHANGED_CONFIRM: "మీరు ఎంచుకున్న భాష సెట్ చేయబడింది.",
     LANG_CHANGED_REORDER_INTRO: "ఇక్కడ మీ items ని తిరిగి చూసి మళ్లీ order చేయడానికి కొత్త link ఉంది.",
+    WEB_NO_ORDER_REENGAGE_BODY: "Hey 👋\n\nమీరు మా wholesale collection చూడుతున్నారు, కానీ order ను పూర్తి చేసే ముందు ఆగిపోయినట్టుంది.\n\nఈ కొత్త link తో మీ cart ను మళ్లీ చూసి, quantities ను update చేసి, మీ wholesale order ను confirm చేయండి.\n\nమళ్లీ ప్రారంభించాలన్నా లేదా భాష మార్చాలన్నా, క్రింద ఉన్న options ను ఉపయోగించండి.",
   },
   hi: {
     LANG_GATE_PROMPT: "डिफ़ॉल्ट भाषा English है।\n\nअगर आप दूसरी भाषा चाहते हैं तो 'Select language / भाषा' दबाएँ।",
@@ -422,6 +426,7 @@ export const messages = {
     BUTTON_CHANGE_LANGUAGE: "भाषा बदलें",
     LANG_CHANGED_CONFIRM: "आपकी पसंदीदा भाषा सेट कर दी गई है।",
     LANG_CHANGED_REORDER_INTRO: "यहाँ आपके items को दोबारा देखने और दोबारा order करने के लिए नया link है.",
+    WEB_NO_ORDER_REENGAGE_BODY: "Hey 👋\n\nहमने देखा कि आप हमारा wholesale collection देख रहे थे लेकिन अपना order पूरा नहीं कर पाए।\n\nइस नए link से अपना cart दोबारा देखें, quantities अपडेट करें और अपना wholesale order Confirm करें.\n\nअगर आप फिर से शुरू करना चाहते हैं या भाषा बदलना चाहते हैं, तो नीचे दिए गए विकल्पों का उपयोग करें.",
     BUTTON_CONTACT_SUPPORT: "सपोर्ट से संपर्क करें",
     CONTACT_SUPPORT_MESSAGE: "*सपोर्ट से संपर्क करें*\n\nअगर आपके wholesale order के लिए सहायता चाहिए, तो आप हमारी sales टीम से संपर्क कर सकते हैं:\n\n- Email: *connect.mansimpex@gmail.com*\n- Sales: *91871 17080*, *84960 07080*\n\n_ज़रूरत हो तो नीचे दिए गए विकल्पों से दोबारा शुरू कर सकते हैं या भाषा बदल सकते हैं._"
   },
@@ -506,7 +511,8 @@ export const messages = {
     CATALOG_FOOTER: "'add <SKU> <QTY>' എന്ന് reply ചെയ്ത് items cart ലേക്ക് ചേർക്കുക, 'cart' കൊണ്ട് കാണുക, 'checkout' കൊണ്ട് order ചെയ്യുക.",
     BUTTON_START: "വീണ്ടും ആരംഭിക്കുക",
     LANG_CHANGED_CONFIRM: "നിങ്ങൾ തിരഞ്ഞെടുത്ത ഭാഷ സെറ്റ് ചെയ്തു.",
-    LANG_CHANGED_REORDER_INTRO: "ഇവിടെ നിങ്ങളുടെ items വീണ്ടും പരിശോധിച്ച് വീണ്ടും order ചെയ്യാനുള്ള പുതിയ link ഉണ്ട്."
+    LANG_CHANGED_REORDER_INTRO: "ഇവിടെ നിങ്ങളുടെ items വീണ്ടും പരിശോധിച്ച് വീണ്ടും order ചെയ്യാനുള്ള പുതിയ link ഉണ്ട്.",
+    WEB_NO_ORDER_REENGAGE_BODY: "Hey 👋\n\nനിങ്ങൾ നമ്മുടെ wholesale collection കാണുകയായിരുന്നുവെങ്കിലും നിങ്ങളുടെ order പൂർത്തിയാക്കാനായിട്ടില്ലെന്ന് തോന്നുന്നു.\n\nഈ പുതിയ link ഉപയോഗിച്ച് നിങ്ങളുടെ cart വീണ്ടും പരിശോധിച്ച്, quantities അപ്ഡേറ്റ് ചെയ്ത്, നിങ്ങളുടെ wholesale order Confirm ചെയ്യൂ.\n\nവീണ്ടും ആരംഭിക്കാനോ ഭാഷ മാറ്റാനോ ആഗ്രഹിക്കുന്നുവെങ്കിൽ, താഴെയുള്ള options ഉപയോഗിക്കുക."
   }
 };
 
