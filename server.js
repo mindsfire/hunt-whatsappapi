@@ -348,15 +348,20 @@ app.post('/admin/reengage-users', async (req, res) => {
       if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
     }
 
-    const [webResult, cartResult] = await Promise.all([
-      reengageWebNoOrderUsers(sendCheckoutLink, { limit: 4 }),
-      reengageCartNoOrderUsers(sendCheckoutLink)
-    ]);
+    // Shared Set to track processed users and prevent duplicates
+    // Run web_no_order first (sends hero images + link), then cart_no_order (link only)
+    // If user is in both, they'll only get the web_no_order version
+    const processedUsers = new Set();
+    
+    const webResult = await reengageWebNoOrderUsers(sendCheckoutLink, { limit: 4, processedUsers });
+    
+    // Pass the same Set to cart function so it skips users already processed by web function
+    const cartResult = await reengageCartNoOrderUsers(sendCheckoutLink, { processedUsers });
 
     return res.status(200).json({
       ok: true,
-      web_no_order: webResult,
-      cart_no_order: cartResult,
+      web_no_order: { processed: webResult.processed },
+      cart_no_order: { processed: cartResult.processed },
       total_processed: webResult.processed + cartResult.processed
     });
   } catch (e) {
