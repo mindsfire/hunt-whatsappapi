@@ -33,6 +33,7 @@ type Product = {
   image_url?: string;
   description?: string;
   sizes?: string[];
+  source_type?: string;
 };
 
 export default function Page() {
@@ -451,6 +452,7 @@ export default function Page() {
                     formatCurrency={formatCurrency}
                     onAddToCart={onAddProductSized}
                     onViewImages={openGallery}
+                    showTypePill={browseType === "all"}
                     onGoToCart={() => {
                       try {
                         const el = document.getElementById("cart");

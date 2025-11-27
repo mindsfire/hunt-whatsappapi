@@ -296,14 +296,17 @@ export function registerApiRoutes(app, adminDb) {
       let list = [];
 
       if (rawType === 'all') {
-        // Combine Indian and Imported product lists into a single "all" view
+        // Combine Indian and Imported product lists into a single "all" view.
+        // Tag each entry with its source type so the UI can show a pill.
         const [indDoc, impDoc] = await Promise.all([
           adminDb.collection('products_by_type').doc('indian').get(),
           adminDb.collection('products_by_type').doc('imported').get(),
         ]);
         const indList = indDoc.exists ? (indDoc.data().items || []) : [];
         const impList = impDoc.exists ? (impDoc.data().items || []) : [];
-        list = [...indList, ...impList];
+        const taggedInd = indList.map((it) => ({ ...it, _srcType: 'indian' }));
+        const taggedImp = impList.map((it) => ({ ...it, _srcType: 'imported' }));
+        list = [...taggedInd, ...taggedImp];
         type = 'all';
       } else {
         const doc = await adminDb.collection('products_by_type').doc(type).get();
@@ -334,7 +337,8 @@ export function registerApiRoutes(app, adminDb) {
         const description = (pd.description || '').toString();
         const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
         const pcs_per_set = Number(pd.pcs_per_set || 0) || 0;
-        items.push({ content_id: sku, title, price, currency, image_url, description, sizes, pcs_per_set });
+        const source_type = (it._srcType || type || '').toString();
+        items.push({ content_id: sku, title, price, currency, image_url, description, sizes, pcs_per_set, source_type });
       }
 
       return res.status(200).json({ ok: true, type, page: p, pageSize, total, pageCount, items });

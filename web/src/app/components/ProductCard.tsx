@@ -10,6 +10,7 @@ export type Product = {
   image_url?: string;
   description?: string;
   sizes?: string[];
+   source_type?: string;
 };
 
 export type ProductCardProps = {
@@ -18,9 +19,10 @@ export type ProductCardProps = {
   onAddToCart: (product: Product, size: string, qty: number) => void;
   onViewImages: (content_id: string) => void;
   onGoToCart: () => void;
+  showTypePill?: boolean;
 };
 
-export default function ProductCard({ product, formatCurrency, onAddToCart, onViewImages, onGoToCart }: ProductCardProps) {
+export default function ProductCard({ product, formatCurrency, onAddToCart, onViewImages, onGoToCart, showTypePill }: ProductCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [selectedSize, setSelectedSize] = useState("");
   const [qty, setQty] = useState(1);
@@ -83,7 +85,24 @@ export default function ProductCard({ product, formatCurrency, onAddToCart, onVi
           />
         </div>
       )}
-      <div style={{ fontWeight: 600, fontSize: 14 }}>{product.title}</div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, flex: 1, minWidth: 0 }}>{product.title}</div>
+        {showTypePill && product.source_type && (
+          <div
+            style={{
+              fontSize: 10,
+              padding: "2px 8px",
+              borderRadius: 999,
+              border: `1px solid ${product.source_type === "imported" ? "#2563eb" : "#16a34a"}`,
+              background: product.source_type === "imported" ? "rgba(37,99,235,0.16)" : "rgba(22,163,74,0.16)",
+              color: product.source_type === "imported" ? "#93c5fd" : "#bbf7d0",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {product.source_type === "imported" ? "Imported" : "Indian"}
+          </div>
+        )}
+      </div>
       {product.description && (
         <div
           style={{
