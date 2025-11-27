@@ -717,15 +717,18 @@ export default function Page() {
         <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>
         <div>Karnataka, India</div>
         <div style={{ marginTop: 8 }}>
-          Copyright © 2025 Mans Impex. Powered by{" "}
-          <a
-            href="https://www.mindsfire.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "#bfdbfe", textDecoration: "none" }}
-          >
-            Mindsfire Private Limited
-          </a>
+          <div>Copyright © 2025 Mans Impex.</div>
+          <div>
+            Powered by{" "}
+            <a
+              href="https://www.mindsfire.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "#bfdbfe", textDecoration: "none" }}
+            >
+              Mindsfire Private Limited
+            </a>
+          </div>
         </div>
       </div>
 
