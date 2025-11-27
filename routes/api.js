@@ -283,7 +283,7 @@ export function registerApiRoutes(app, adminDb) {
     try {
       const u = (req.query.u || '').toString().trim();
       const tkn = (req.query.t || '').toString().trim();
-      const type = (req.query.type || 'indian').toString().toLowerCase();
+      const rawType = (req.query.type || 'indian').toString().toLowerCase();
       const page = Math.max(1, parseInt((req.query.page || '1').toString(), 10) || 1);
       const pageSize = Math.max(1, Math.min(50, parseInt((req.query.pageSize || '20').toString(), 10) || 20));
       if (!u) return res.status(400).json({ ok: false, error: 'u required' });
@@ -292,8 +292,27 @@ export function registerApiRoutes(app, adminDb) {
         if (status !== 'ok') return res.status(401).json({ ok: false, error: 'checkout_session_' + status });
       }
 
-      const doc = await adminDb.collection('products_by_type').doc(type).get();
-      const list = doc.exists ? (doc.data().items || []) : [];
+      let type = rawType;
+      let list = [];
+
+      if (rawType === 'all') {
+        // Combine Indian and Imported product lists into a single "all" view.
+        // Tag each entry with its source type so the UI can show a pill.
+        const [indDoc, impDoc] = await Promise.all([
+          adminDb.collection('products_by_type').doc('indian').get(),
+          adminDb.collection('products_by_type').doc('imported').get(),
+        ]);
+        const indList = indDoc.exists ? (indDoc.data().items || []) : [];
+        const impList = impDoc.exists ? (impDoc.data().items || []) : [];
+        const taggedInd = indList.map((it) => ({ ...it, _srcType: 'indian' }));
+        const taggedImp = impList.map((it) => ({ ...it, _srcType: 'imported' }));
+        list = [...taggedInd, ...taggedImp];
+        type = 'all';
+      } else {
+        const doc = await adminDb.collection('products_by_type').doc(type).get();
+        list = doc.exists ? (doc.data().items || []) : [];
+      }
+
       const total = Array.isArray(list) ? list.length : 0;
       const pageCount = Math.max(1, Math.ceil(total / pageSize));
       const p = Math.min(Math.max(1, page), pageCount);
@@ -318,7 +337,8 @@ export function registerApiRoutes(app, adminDb) {
         const description = (pd.description || '').toString();
         const sizes = Array.isArray(pd.sizes) ? pd.sizes : [];
         const pcs_per_set = Number(pd.pcs_per_set || 0) || 0;
-        items.push({ content_id: sku, title, price, currency, image_url, description, sizes, pcs_per_set });
+        const source_type = (it._srcType || type || '').toString();
+        items.push({ content_id: sku, title, price, currency, image_url, description, sizes, pcs_per_set, source_type });
       }
 
       return res.status(200).json({ ok: true, type, page: p, pageSize, total, pageCount, items });
