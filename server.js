@@ -12,6 +12,7 @@ import { waSend, sendText, sendButtons, sendList, sendImage, sendImageByMediaId,
 import { makeCheckoutToken, verifyCheckoutToken, buildCheckoutUrl } from './lib/checkout.js';
 import { graphGet, fetchSets, fetchSetItems, fetchSetProductsDetailed, parsePriceToNumber } from './lib/graph.js';
 import { getOrCreateMediaIdForGcsPath } from './lib/media.js';
+import { reengageWebNoOrderUsers, reengageCartNoOrderUsers } from './lib/reengage.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerApiRoutes } from './routes/api.js';
 import {
@@ -40,6 +41,7 @@ const PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID || '';
 const WA_APP_SECRET = process.env.WA_APP_SECRET || '';
 const SYNC_SHARED_SECRET = process.env.SYNC_SHARED_SECRET || '';
 const SALES_SHEET_ID = process.env.SALES_SHEET_ID || '';
+const LEADS_SHEET_ID = process.env.LEADS_SHEET_ID || '';
 // Media/GCS/WhatsApp media upload
 const MEDIA_BUCKET = process.env.MEDIA_BUCKET || '';
 const MEDIA_BASE_PREFIX = (process.env.MEDIA_BASE_PREFIX || '').replace(/^\/+|\/+$/g, ''); // e.g. 'media'
@@ -333,8 +335,152 @@ app.get('/admin/export-products-csv', async (req, res) => {
   }
 });
 
-
 function nowIso() { return new Date().toISOString(); }
+
+function toIstString(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+}
+
+// --- Admin: Re-engage Web_No_Order and Cart_No_Order users ---
+// Web_No_Order: Sends hero images (cheapest Indian products) + fresh checkout link
+// Cart_No_Order: Sends fresh checkout link only (no images)
+// Usage: POST /admin/reengage-users or GET /admin/reengage-users (protected by SYNC_SHARED_SECRET)
+// Can be triggered by Cloud Scheduler
+async function handleReengageUsers(req, res) {
+  const startTime = Date.now();
+  const runId = `reengage-${Date.now()}`;
+  let webResult = { processed: 0, skipped: 0, failed: 0 };
+  let cartResult = { processed: 0, skipped: 0, failed: 0 };
+  
+  try {
+    if (SYNC_SHARED_SECRET) {
+      const token = req.get('X-Shared-Secret') || '';
+      if (token !== SYNC_SHARED_SECRET) return res.sendStatus(401);
+    }
+
+    console.log(`[${runId}] Starting re-engagement job`);
+
+    // Shared Set to track processed users and prevent duplicates
+    // Run web_no_order first (sends hero images + link), then cart_no_order (link only)
+    // If user is in both, they'll only get the web_no_order version
+    const processedUsers = new Set();
+    
+    console.log(`[${runId}] Processing web_no_order users...`);
+    webResult = await reengageWebNoOrderUsers({ limit: 4, processedUsers });
+    console.log(`[${runId}] Web_No_Order completed: ${webResult.processed} users processed`);
+    
+    // Pass the same Set to cart function so it skips users already processed by web function
+    console.log(`[${runId}] Processing cart_no_order users...`);
+    cartResult = await reengageCartNoOrderUsers({ processedUsers });
+    console.log(`[${runId}] Cart_No_Order completed: ${cartResult.processed} users processed`);
+
+    const totalProcessed = webResult.processed + cartResult.processed;
+    const duration = Date.now() - startTime;
+    
+    console.log(`[${runId}] Re-engagement job completed successfully in ${duration}ms`, {
+      web_no_order: webResult.processed,
+      cart_no_order: cartResult.processed,
+      total_processed: totalProcessed,
+      duration_ms: duration
+    });
+
+    const response = {
+      ok: true,
+      run_id: runId,
+      web_no_order: { processed: webResult.processed, skipped: webResult.skipped, failed: webResult.failed },
+      cart_no_order: { processed: cartResult.processed, skipped: cartResult.skipped, failed: cartResult.failed },
+      total_processed: totalProcessed,
+      duration_ms: duration
+    };
+
+    // Log to Google Sheets (best-effort, don't fail if this fails)
+    try {
+      if (LEADS_SHEET_ID) {
+        const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+        const sheets = google.sheets({ version: 'v4', auth });
+        const timestamp = toIstString(new Date().toISOString());
+        const row = [
+          timestamp,
+          runId,
+          webResult.processed,
+          cartResult.processed,
+          totalProcessed,
+          duration,
+          'Success',
+          ''
+        ];
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: LEADS_SHEET_ID,
+          range: 'Reengagement_Runs!A1',
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [row] },
+        });
+        console.log(`[${runId}] Logged run to Reengagement_Runs sheet`);
+      }
+    } catch (sheetsError) {
+      console.error(`[${runId}] Failed to log to Google Sheets (non-fatal)`, { error: sheetsError });
+    }
+
+    return res.status(200).json(response);
+  } catch (e) {
+    const duration = Date.now() - startTime;
+    const errorMsg = String(e);
+    console.error(`[${runId}] Re-engagement job failed after ${duration}ms`, {
+      error: e,
+      stack: e.stack,
+      web_no_order: webResult,
+      cart_no_order: cartResult
+    });
+    
+    const totalProcessed = (webResult.processed || 0) + (cartResult.processed || 0);
+    const response = {
+      ok: false,
+      run_id: runId,
+      error: errorMsg,
+      duration_ms: duration,
+      web_no_order: webResult,
+      cart_no_order: cartResult,
+      total_processed: totalProcessed
+    };
+
+    // Log to Google Sheets even on error (best-effort, don't fail if this fails)
+    try {
+      if (LEADS_SHEET_ID) {
+        const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/spreadsheets'] });
+        const sheets = google.sheets({ version: 'v4', auth });
+        const timestamp = toIstString(new Date().toISOString());
+        const row = [
+          timestamp,
+          runId,
+          webResult.processed || 0,
+          cartResult.processed || 0,
+          totalProcessed,
+          duration,
+          'Error',
+          errorMsg.substring(0, 500) // Limit error message length
+        ];
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: LEADS_SHEET_ID,
+          range: 'Reengagement_Runs!A1',
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [row] },
+        });
+        console.log(`[${runId}] Logged failed run to Reengagement_Runs sheet`);
+      }
+    } catch (sheetsError) {
+      console.error(`[${runId}] Failed to log to Google Sheets (non-fatal)`, { error: sheetsError });
+    }
+
+    return res.status(200).json(response);
+  }
+}
+
+// Support both POST and GET for re-engagement, reusing the same handler.
+app.post('/admin/reengage-users', handleReengageUsers);
+app.get('/admin/reengage-users', handleReengageUsers);
 
 // --- Firestore-backed browse/detail (GCS indexed) ---
 async function getTypes() {
