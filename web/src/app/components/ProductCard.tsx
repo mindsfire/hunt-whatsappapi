@@ -98,7 +98,7 @@ export default function ProductCard({ product, formatCurrency, onAddToCart, onVi
         </div>
       )}
       <div style={{ fontSize: 14, opacity: 0.9 }}>
-        {formatCurrency(product.currency)} {product.price}
+        {formatCurrency(product.currency)} {product.price} / Pc
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
