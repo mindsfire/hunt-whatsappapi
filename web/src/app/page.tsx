@@ -37,6 +37,7 @@ type Product = {
 };
 
 export default function Page() {
+  const WA_CHAT_URL = "https://wa.me/message/UJZ3AUOEXVPUN1";
   const query = useQuery();
   const waId = query["u"] || "";
   const token = query["t"] || "";
@@ -363,6 +364,33 @@ export default function Page() {
             <div style={{ fontSize: 13, opacity: 0.9 }}>
               Please go back to your WhatsApp chat with us and request a new checkout link to continue browsing and placing orders.
             </div>
+            <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
+              <a
+                href={WA_CHAT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open WhatsApp chat to request a new checkout link"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "9px 18px",
+                  borderRadius: 9999,
+                  background: "#16a34a",
+                  color: "#f9fafb",
+                  textDecoration: "none",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  marginTop: 4,
+                }}
+              >
+                <img
+                  src="Digital_Inline_White.svg"
+                  alt="WhatsApp"
+                  style={{ height: 18, width: "auto", display: "block" }}
+                />
+              </a>
+            </div>
           </div>
         </div>
       ) : orderId ? (
@@ -688,6 +716,17 @@ export default function Page() {
         <div>Reg Address: Ward No 17, Assessment No 10323, Kalenahalli Hosa Badavane</div>
         <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>
         <div>Karnataka, India</div>
+        <div style={{ marginTop: 8 }}>
+          Copyright © 2025 Mans Impex. Powered by{" "}
+          <a
+            href="https://www.mindsfire.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#bfdbfe", textDecoration: "none" }}
+          >
+            Mindsfire Private Limited
+          </a>
+        </div>
       </div>
 
       {/* Toast notification */}
