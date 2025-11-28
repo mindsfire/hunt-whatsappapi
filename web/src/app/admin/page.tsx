@@ -912,6 +912,20 @@ export default function AdminPage() {
         <div>Reg Address: Ward No 17, Assessment No 10323, Kalenahalli Hosa Badavane</div>
         <div>Hassan Mysore Highway, Krishnarajanagara, Mysuru - 571602</div>
         <div>Karnataka, India</div>
+        <div style={{ marginTop: 8 }}>
+          <div>Copyright © 2025 Mans Impex.</div>
+          <div>
+            Powered by{" "}
+            <a
+              href="https://www.mindsfire.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "#bfdbfe", textDecoration: "none" }}
+            >
+              Mindsfire Private Limited
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   );
