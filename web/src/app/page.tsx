@@ -385,7 +385,7 @@ export default function Page() {
                 }}
               >
                 <img
-                  src="Digital_Inline_White.svg"
+                  src="/checkout/Digital_Inline_White.svg"
                   alt="WhatsApp"
                   style={{ height: 18, width: "auto", display: "block" }}
                 />
