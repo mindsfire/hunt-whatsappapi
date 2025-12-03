@@ -692,7 +692,10 @@ export default function Page() {
                 fontWeight: 600,
               }}
             >
-              {placing ? "Placing…" : "Place Order"}
+              {placing ? "Placing…" : <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}>
+                <span>Order Now</span>
+                <span style={{ fontSize: '12px', opacity: 0.9 }}>Pay Later</span>
+              </div>}
             </button>
           </div>
         </>
