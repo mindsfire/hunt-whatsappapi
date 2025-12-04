@@ -49,7 +49,7 @@ export const messages = {
     CONFIRM_ORDER_CANCELLED: "Order cancelled.",
     CONFIRM_CHOOSE_ACTION: "Please Confirm or Cancel.",
     ORDER_CONFIRM_HEADER: "Order received successfully ✅",
-    ORDER_CONFIRM_BODY: "Thank you for your order!\nYour Order ID is: *{id}*\nOur sales team will contact you shortly to confirm payment and delivery details.",
+    ORDER_CONFIRM_BODY: "Thank you for your order!\nYour Order ID is: *{id}*\nOur sales team will contact you shortly to confirm payment and delivery details.\n\n*Note:* If you are a retailer or wholesaler and have chosen Cash on Delivery (COD), 20% of the billed amount must be paid before we dispatch your order. The remaining 80% can be paid upon delivery.",
     ORDER_CONFIRM_FOOTER: "_Mans Impex – Manufacturer | Exporters – Shirts, T-Shirts, Trousers & Sportswear_",
     BUTTON_HELP: "Help",
     BUTTON_RESEND_LINK: "Resend link",
