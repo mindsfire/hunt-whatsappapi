@@ -1,7 +1,7 @@
 import { getSession as dbGetSession, saveSession as dbSaveSession, getCart as dbGetCart, saveCart as dbSaveCart, createOrderDoc, markCheckoutTokenUsed } from '../firestore.js';
 import { getCheckoutTokenStatus } from '../lib/checkout.js';
 import { google } from 'googleapis';
-import { sendButtons, sendText } from '../lib/wa.js';
+import { sendButtons, sendText, sendInternalOrderAlertTemplate } from '../lib/wa.js';
 import { t } from '../locales.js';
 
 function nowIso() { return new Date().toISOString(); }
@@ -227,10 +227,8 @@ export function registerApiRoutes(app, adminDb) {
         if (internalWa) {
           const totalStr = `₹${subtotal}`;
           const buyerName = (business && business.name) ? business.name.toString() : '';
-          const buyerLine = buyerName ? `Buyer: *${buyerName}*\n` : '';
-          const buyerWaLine = `Whatsapp Number : *${u}*\n`;
-          const msg = `*New wholesale order placed 🚀*\n\nOrder ID : *${id}*\n${buyerLine}${buyerWaLine}\nTotal : *${totalStr}*`;
-          await sendText(internalWa, msg);
+          const buyerWaNumber = u;
+          await sendInternalOrderAlertTemplate(internalWa, id, buyerName, buyerWaNumber, totalStr);
         }
       } catch (e) {
         console.error('internal WA order alert error', e);
