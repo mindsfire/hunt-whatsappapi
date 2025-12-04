@@ -681,18 +681,21 @@ export default function Page() {
               onClick={placeOrder}
               disabled={placing}
               style={{
-                padding: "13px 32px",
+                padding: "10px 20px",
                 background: "#16a34a",
                 color: "white",
                 border: 0,
                 borderRadius: 9999,
                 cursor: placing ? "default" : "pointer",
                 fontSize: 15,
-                minWidth: 180,
+                minWidth: 150,
                 fontWeight: 600,
               }}
             >
-              {placing ? "Placing…" : "Place Order"}
+              {placing ? "Placing…" : <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.2 }}>
+                <span>Order Now</span>
+                <span style={{ fontSize: '10px', opacity: 0.7 }}>Pay Later</span>
+              </div>}
             </button>
           </div>
         </>
